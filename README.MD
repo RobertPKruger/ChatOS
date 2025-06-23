@@ -17,7 +17,7 @@ MIN_CONFIDENCE_LENGTH=3
 USERNAME='<your name>'
 
 # Api key
-OPENAI_API_KEY= <PASTE KEY HERE.>
+OPENAI_API_KEY= PASTE KEY HERE.
 
 2. Install requirements to host and server environments.
 
