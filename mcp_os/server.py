@@ -129,6 +129,7 @@ def launch_app(app_name: str) -> str:
         return f"Application '{app_name}' not found."
 
     username = os.getenv('USERNAME', '')
+    errors = []
     
     for exe in executables:
         try:
@@ -146,21 +147,28 @@ def launch_app(app_name: str) -> str:
                 subprocess.Popen(path, shell=True)
                 return f"Launched '{app_name}'"
                 
-            # Absolute path
-            elif os.path.exists(path):
-                subprocess.Popen([path], shell=False)
-                return f"Launched '{app_name}'"
-                
+            # Absolute path - check if it exists first
+            elif os.path.isabs(path):
+                if os.path.exists(path):
+                    # For absolute paths, use os.startfile on Windows
+                    os.startfile(path)
+                    return f"Launched '{app_name}' from {path}"
+                else:
+                    errors.append(f"Path not found: {path}")
+                    continue
+                    
             # Try to find in PATH
             elif shutil.which(path):
                 subprocess.Popen([path], shell=False)
                 return f"Launched '{app_name}'"
+            else:
+                errors.append(f"Not found in PATH: {path}")
                 
         except Exception as e:
-            logging.debug(f"Failed to launch '{exe}': {e}")
+            errors.append(f"Failed to launch '{exe}': {str(e)}")
             continue
 
-    return f"Failed to launch '{app_name}'. Tried: {executables}"
+    return f"Failed to launch '{app_name}'. Errors: {'; '.join(errors)}"
 
 @mcp.tool()
 def test_app_availability() -> str:
@@ -245,39 +253,48 @@ def launch_by_path(executable_path: str, args: str = "") -> str:
         return str(f"Failed to launch: {str(e)}")
 
 @mcp.tool()
-def find_office_apps() -> str:
-    """Try to locate Microsoft Office applications in common installation paths."""
-    office_locations = [
-        r"C:\Program Files\Microsoft Office\root\Office16",
-        r"C:\Program Files\Microsoft Office",
-        r"C:\Program Files (x86)\Microsoft Office",
-        r"C:\Program Files\Microsoft Office 15",
-        r"C:\Program Files\Microsoft Office 16",
-        r"C:\Program Files (x86)\Microsoft Office 15",
-        r"C:\Program Files (x86)\Microsoft Office 16",
-    ]
+def debug_office_launch() -> str:
+    """Debug Office launch issues by checking paths and trying different methods."""
+    office_path = r"C:\Program Files\Microsoft Office\root\Office16"
+    results = []
     
-    office_apps = {
-        "winword.exe": "Microsoft Word",
-        "excel.exe": "Microsoft Excel",
-        "powerpnt.exe": "Microsoft PowerPoint",
-        "outlook.exe": "Microsoft Outlook"
-    }
-    
-    found_apps = []
-    
-    for base_path in office_locations:
-        if os.path.exists(base_path):
-            for root, dirs, files in os.walk(base_path):
-                for app_exe, app_name in office_apps.items():
-                    if app_exe in files:
-                        full_path = os.path.join(root, app_exe)
-                        found_apps.append(f"{app_name}: {full_path}")
-    
-    if found_apps:
-        return "Found Office applications:\n" + "\n".join(found_apps)
+    # Check if the Office directory exists
+    if os.path.exists(office_path):
+        results.append(f"✓ Office directory exists: {office_path}")
+        
+        # Check for specific executables
+        office_apps = {
+            "WINWORD.EXE": "Word",
+            "EXCEL.EXE": "Excel", 
+            "POWERPNT.EXE": "PowerPoint",
+            "OUTLOOK.EXE": "Outlook"
+        }
+        
+        for exe_name, app_name in office_apps.items():
+            exe_path = os.path.join(office_path, exe_name)
+            if os.path.exists(exe_path):
+                results.append(f"✓ {app_name} found: {exe_path}")
+                
+                # Try different launch methods
+                try:
+                    # Method 1: os.startfile
+                    os.startfile(exe_path)
+                    results.append(f"  → Successfully launched {app_name} with os.startfile")
+                except Exception as e:
+                    results.append(f"  → os.startfile failed: {e}")
+                    
+                    try:
+                        # Method 2: subprocess with shell=False
+                        subprocess.Popen([exe_path])
+                        results.append(f"  → Successfully launched {app_name} with subprocess")
+                    except Exception as e2:
+                        results.append(f"  → subprocess failed: {e2}")
+            else:
+                results.append(f"✗ {app_name} NOT found: {exe_path}")
     else:
-        return "No Office applications found in common locations"
+        results.append(f"✗ Office directory NOT found: {office_path}")
+        
+    return "\n".join(results)
 
 if __name__ == "__main__":
     # prints a one-line JSON schema, then listens for tool calls
