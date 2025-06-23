@@ -2,6 +2,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import TextContent  # Import TextContent explicitly
 import subprocess, os, pathlib, shutil
 import winreg  # For registry lookups on Windows
+import logging
 
 mcp = FastMCP("local-os")
 
@@ -28,6 +29,16 @@ APPS = {
     # Special protocols
     "settings": ["ms-settings:"],
     "windows settings": ["ms-settings:"],
+
+    # For Office apps, we'll use a different approach
+    "word": ["winword.exe", "start winword"],
+    "microsoft word": ["winword.exe", "start winword"],
+    "winword": ["winword.exe", "start winword"],
+    "excel": ["excel.exe", "start excel"],
+    "microsoft excel": ["excel.exe", "start excel"],
+    "powerpoint": ["powerpnt.exe", "start powerpnt"],
+    "outlook": ["outlook.exe", "start outlook"],
+
     # Common third-party apps with multiple possible names/paths
     "chrome": [
         "chrome.exe",
@@ -81,37 +92,32 @@ def find_executable(app_paths):
     return None
 
 @mcp.tool()
-def launch_app(app: str = "notepad") -> str:
-    """Open an approved desktop application.
-    
-    Args:
-        app: Name of the application to launch (e.g., 'notepad', 'calculator', 'chrome')
-    """
-    app_key = app.lower().strip()
-    app_paths = APPS.get(app_key)
-    
-    if not app_paths:
-        available = ", ".join(sorted(APPS.keys()))
-        return f"'{app}' is not on the allow-list. Available apps: {available}"
+def launch_app(app_name: str) -> str:
+    """Attempts to launch the given application or protocol."""
+    key = app_name.lower()
+    executables = APPS.get(key)
+    if not executables:
+        return f"Application '{app_name}' not found."
 
-    exe = find_executable(app_paths)
-    if not exe:
-        return f"Could not find executable for '{app}'. It may not be installed or not in expected locations."
+    for exe in executables:
+        try:
+            # Expand potential placeholders
+            path = exe.format(username=os.getlogin())
+            # Protocol handlers (e.g. ms-settings:)
+            if path.endswith(":"):
+                os.startfile(path)
+            # Absolute path or in PATH
+            elif os.path.exists(path):
+                subprocess.Popen([path], shell=False)
+            else:
+                # Try shell launch (will search PATH)
+                subprocess.Popen([path], shell=True)
+            return f"Launched '{app_name}'"
+        except Exception as e:
+            logging.logger.debug(f"Failed to launch '{exe}': {e}")
+            continue
 
-    try:
-        # Special handling for Windows Settings and other ms- protocols
-        if exe.startswith("ms-"):
-            os.system(f"start {exe}")
-            result = f"Opened {app}."
-        else:
-            # Use shell=True to let Windows find the executable in PATH
-            subprocess.Popen([exe], shell=True)
-            result = f"Opened {app} using: {exe}"
-        
-        # Return just the string, FastMCP should handle the TextContent wrapping
-        return result
-    except Exception as e:
-        return f"Failed to launch {app}: {str(e)}"
+    return f"Failed to launch '{app_name}'. Tried: {executables}"
 
 @mcp.tool()
 def test_app_availability() -> str:

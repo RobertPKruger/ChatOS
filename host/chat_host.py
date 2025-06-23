@@ -1,14 +1,13 @@
-# enhanced_chat_host.py
+
+# enhanced_chat_host_v2.py
 """
-Enhanced MCP Chat Host - A resilient background voice assistant
-Improvements:
-- Comprehensive error handling and recovery
-- Proper logging with rotation
-- Configuration management
-- Auto-restart capabilities
-- Voice Activity Detection ready
-- System tray integration ready
-- Graceful shutdown handling
+Enhanced MCP Chat Host - Always-on voice assistant with interruption support
+New features:
+- Continuous listening (no push-to-talk)
+- Voice Activity Detection (VAD) support
+- Interrupt assistant while speaking
+- Proper shutdown of both server and client
+- Improved audio handling
 """
 
 import asyncio
@@ -27,13 +26,20 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
+import numpy as np
 
 import sounddevice as sd
 import soundfile as sf
+import pygame  # Fallback audio player
 from openai import OpenAI
-from pynput import keyboard
 from fastmcp import Client
 from dotenv import load_dotenv
+try:
+    import webrtcvad
+    VAD_AVAILABLE = True
+except ImportError:
+    logger.warning("webrtcvad not available, falling back to energy-based detection")
+    VAD_AVAILABLE = False
 
 # Load environment variables
 load_dotenv()
@@ -54,7 +60,15 @@ class Config:
     max_retries: int = 3
     log_level: str = "INFO"
     log_file: str = "voice_assistant.log"
-    enable_vad: bool = False  # Future: Voice Activity Detection
+    enable_vad: bool = True
+    vad_aggressiveness: int = 3  # 0-3, higher = more aggressive (increased from 2)
+    silence_threshold: float = 0.03  # Energy threshold for silence detection (increased)
+    silence_duration: float = 1.5  # Seconds of silence before processing
+    min_speech_duration: float = 0.8  # Minimum speech duration in seconds (increased)
+    energy_threshold_multiplier: float = 2.0  # Dynamic threshold multiplier (increased)
+    min_confidence_length: int = 2  # Minimum words for valid transcription
+    max_energy_threshold: float = 0.5  # Maximum energy threshold to prevent oversensitivity
+    english_confidence_threshold: float = 0.7  # Confidence threshold for language detection
     
     @classmethod
     def from_env(cls) -> "Config":
@@ -72,11 +86,27 @@ class Config:
             max_retries=int(os.getenv("MAX_RETRIES", "3")),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             log_file=os.getenv("LOG_FILE", "voice_assistant.log"),
-            enable_vad=os.getenv("ENABLE_VAD", "false").lower() == "true"
+            enable_vad=os.getenv("ENABLE_VAD", "true").lower() == "true",
+            vad_aggressiveness=int(os.getenv("VAD_AGGRESSIVENESS", "3")),
+            silence_threshold=float(os.getenv("SILENCE_THRESHOLD", "0.03")),
+            silence_duration=float(os.getenv("SILENCE_DURATION", "1.5")),
+            min_speech_duration=float(os.getenv("MIN_SPEECH_DURATION", "0.8")),
+            energy_threshold_multiplier=float(os.getenv("ENERGY_THRESHOLD_MULTIPLIER", "2.0")),
+            min_confidence_length=int(os.getenv("MIN_CONFIDENCE_LENGTH", "3")),
+            max_energy_threshold=float(os.getenv("MAX_ENERGY_THRESHOLD", "0.5")),
+            english_confidence_threshold=float(os.getenv("ENGLISH_CONFIDENCE_THRESHOLD", "0.7"))
         )
 
 # Global configuration
 config = Config.from_env()
+
+# Initialize pygame mixer as fallback
+try:
+    pygame.mixer.init()
+    PYGAME_AVAILABLE = True
+except:
+    PYGAME_AVAILABLE = False
+    logger.warning("pygame not available for audio fallback")
 
 # Setup logging
 def setup_logging():
@@ -104,12 +134,16 @@ class AssistantState:
     def __init__(self):
         self.running = True
         self.muted = False
+        self.is_speaking = False
+        self.interrupt_flag = threading.Event()
         self.openai_client: Optional[OpenAI] = None
         self.mcp_client: Optional[Client] = None
+        self.mcp_process: Optional[subprocess.Popen] = None
         self.tools_cache: List[Dict[str, Any]] = []
         self.tools_cache_time: float = 0
         self.conversation_history: List[Dict[str, Any]] = []
         self.audio_queue: asyncio.Queue = asyncio.Queue()
+        self.vad = webrtcvad.Vad(config.vad_aggressiveness) if (config.enable_vad and VAD_AVAILABLE) else None
         
     def reset_conversation(self):
         """Reset the conversation history"""
@@ -121,14 +155,25 @@ state = AssistantState()
 
 # System prompt
 SYSTEM_PROMPT = """
-You are my personal voice assistant …
+You are my personal voice assistant. Keep responses conversational and natural, but concise.
 
 When the user asks to open an application like "Open Notepad" or "Launch Calculator", use the launch_app tool and provide the appropriate app name as a parameter. For example:
 - For "Open Notepad" → use launch_app with app="notepad"
 - For "Open Calculator" → use launch_app with app="calc"
 - For "Open File Explorer" → use launch_app with app="explorer"
 
-Always provide the app parameter when using launch_app tool.
+Steam Game Commands:
+- For "Open Steam" or "Launch Steam" → use open_steam tool
+- For "Open Steam store/library/community" → use open_steam with the appropriate page parameter
+- For "Play [game name]" or "Launch [game name]" → use launch_steam_game with game_name parameter
+- For "What games do I have?" → use list_steam_games
+- Common game examples:
+  - "Play Counter-Strike" → launch_steam_game(game_name="Counter-Strike 2")
+  - "Launch Dota" → launch_steam_game(game_name="Dota 2")
+  - "Open Team Fortress 2" → launch_steam_game(game_name="Team Fortress 2")
+  - "Play game 730" → launch_steam_game(app_id="730")
+
+Always provide the appropriate parameters when using tools.
 
 If you encounter any errors with tools, explain what went wrong and suggest alternatives when possible.
 
@@ -137,121 +182,237 @@ File-system examples
 - "Create a folder called Projects inside Documents"
   → create_folder(path="~/Documents/Projects")
 - "Create a folder named Projects on my desktop"
-  → create_folder(path="~/Desktop/Projects")          # <-- NEW
+  → create_folder(path="~/Desktop/Projects")
 - "Open my desktop folder"
   → open_folder(path="~/Desktop")
-…
 
+When the user asks to shut down, exit, or quit, acknowledge and prepare to shut down the system.
 """
 
 ################################################################################
-# Error handling and retry utilities
+# Audio recording with continuous listening
 ################################################################################
 
-async def retry_with_backoff(coro, max_retries: int = None, base_delay: float = 1.0):
-    """Retry a coroutine with exponential backoff"""
-    if max_retries is None:
-        max_retries = config.max_retries
+class ContinuousAudioRecorder:
+    """Manages continuous audio recording with VAD and interruption support"""
+    
+    def __init__(self, sample_rate: int = 16000):
+        self.sample_rate = sample_rate
+        self.audio_queue = queue.Queue()
+        self.recording = False
+        self.stream = None
+        self._lock = threading.Lock()
         
-    for attempt in range(max_retries + 1):
+        # List available audio devices for debugging
         try:
-            return await coro
+            devices = sd.query_devices()
+            logger.info("Available audio devices:")
+            for i, device in enumerate(devices):
+                logger.info(f"  {i}: {device['name']} - In:{device['max_input_channels']} Out:{device['max_output_channels']}")
         except Exception as e:
-            if attempt == max_retries:
-                logger.error(f"Final retry attempt failed: {e}")
-                raise
-            
-            delay = base_delay * (2 ** attempt)
-            logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
-            await asyncio.sleep(delay)
-
-################################################################################
-# Audio recording with improved error handling
-################################################################################
-
-def record_until_space(fs: int = None) -> Optional[io.BytesIO]:
-    """Record audio until space key is released, with error handling"""
-    if fs is None:
-        fs = config.sample_rate
+            logger.warning(f"Could not query audio devices: {e}")
         
-    logger.info("Hold space to talk...")
-    audio_queue = queue.Queue()
-    stop_event = threading.Event()
+    def start(self):
+        """Start continuous recording"""
+        with self._lock:
+            if self.recording:
+                return
+                
+            self.recording = True
+            self.stream = sd.InputStream(
+                samplerate=self.sample_rate,
+                blocksize=int(self.sample_rate * 0.03),  # 30ms chunks for VAD
+                dtype="int16",
+                channels=1,
+                callback=self._audio_callback
+            )
+            self.stream.start()
+            logger.info("Started continuous audio recording")
     
-    def on_key_release(key):
-        if key == keyboard.Key.space:
-            stop_event.set()
-            return False  # Stop listener
+    def stop(self):
+        """Stop recording"""
+        with self._lock:
+            self.recording = False
+            if self.stream:
+                self.stream.stop()
+                self.stream.close()
+                self.stream = None
+            logger.info("Stopped audio recording")
     
-    # Setup keyboard listener
-    kb_listener = keyboard.Listener(on_release=on_key_release)
-    kb_listener.start()
-    
-    def audio_callback(indata, frames, time_info, status):
+    def _audio_callback(self, indata, frames, time_info, status):
+        """Audio stream callback"""
         if status:
             logger.warning(f"Audio callback status: {status}")
-        audio_queue.put(bytes(indata))
+        if self.recording:
+            self.audio_queue.put(bytes(indata))
     
-    wav_buffer = io.BytesIO()
+    def get_audio_energy(self, audio_data: np.ndarray) -> float:
+        """Calculate RMS energy of audio data"""
+        return np.sqrt(np.mean(audio_data.astype(float)**2))
     
-    try:
-        # Setup audio stream with error handling
-        with sd.RawInputStream(
-            samplerate=fs,
-            blocksize=0,
-            dtype="int16",
-            channels=1,
-            callback=audio_callback
-        ) as stream:
-            
+    async def record_until_silence(self) -> Optional[io.BytesIO]:
+        """Record audio until silence is detected"""
+        logger.info("Listening for speech...")
+        
+        frames = []
+        silence_frames = 0
+        speech_frames = 0
+        speech_started = False
+        required_silence_frames = int(config.silence_duration * self.sample_rate / (self.sample_rate * 0.03))
+        min_speech_frames = int(config.min_speech_duration * self.sample_rate / (self.sample_rate * 0.03))
+        
+        # Dynamic noise floor estimation
+        noise_samples = []
+        noise_floor = config.silence_threshold
+        
+        # Track peak energy to detect actual speech
+        peak_energy = 0
+        
+        while self.recording and not state.interrupt_flag.is_set():
+            try:
+                # Get audio chunk
+                audio_chunk = self.audio_queue.get(timeout=0.1)
+                
+                # Convert to numpy array
+                audio_data = np.frombuffer(audio_chunk, dtype=np.int16)
+                energy = self.get_audio_energy(audio_data)
+                
+                # Update peak energy
+                if energy > peak_energy:
+                    peak_energy = energy
+                
+                # Update noise floor during initial silence
+                if not speech_started and len(noise_samples) < 50:  # ~1.5 seconds of samples
+                    noise_samples.append(energy)
+                    if len(noise_samples) >= 20:
+                        # Calculate noise floor with some headroom
+                        noise_floor = np.percentile(noise_samples, 95) * config.energy_threshold_multiplier
+                        noise_floor = max(noise_floor, config.silence_threshold)
+                        noise_floor = min(noise_floor, config.max_energy_threshold)
+                
+                # Check if someone is speaking (to interrupt assistant)
+                if state.is_speaking and energy > noise_floor * 1.5:
+                    logger.info("User interruption detected")
+                    state.interrupt_flag.set()
+                    return None
+                
+                # Use VAD if enabled and available
+                if config.enable_vad and state.vad and VAD_AVAILABLE:
+                    # VAD requires specific frame size
+                    frame_duration = 30  # ms
+                    required_samples = int(self.sample_rate * frame_duration / 1000)
+                    
+                    if len(audio_data) == required_samples:
+                        is_speech = state.vad.is_speech(audio_chunk, self.sample_rate)
+                        # Also require energy threshold for VAD
+                        is_speech = is_speech and energy > noise_floor
+                    else:
+                        is_speech = energy > noise_floor
+                else:
+                    is_speech = energy > noise_floor
+                
+                if is_speech:
+                    if not speech_started:
+                        # Require sustained energy above threshold
+                        if energy > noise_floor * 1.5:  # Higher threshold for speech start
+                            logger.info(f"Speech detected (energy: {energy:.4f}, threshold: {noise_floor:.4f})")
+                            speech_started = True
+                            frames.append(audio_chunk)
+                            speech_frames += 1
+                    else:
+                        frames.append(audio_chunk)
+                        speech_frames += 1
+                    silence_frames = 0
+                elif speech_started:
+                    frames.append(audio_chunk)
+                    silence_frames += 1
+                    
+                    if silence_frames >= required_silence_frames:
+                        # Check if we have enough speech frames
+                        if speech_frames >= min_speech_frames:
+                            # Also check if peak energy was significant
+                            if peak_energy > noise_floor * 2:
+                                logger.info(f"Silence detected after {speech_frames} speech frames (peak energy: {peak_energy:.4f})")
+                                break
+                            else:
+                                logger.info(f"Ignoring low-energy speech (peak: {peak_energy:.4f})")
+                                frames = []
+                                speech_frames = 0
+                                speech_started = False
+                                silence_frames = 0
+                                peak_energy = 0
+                        else:
+                            logger.info(f"Ignoring short noise burst ({speech_frames} frames)")
+                            frames = []
+                            speech_frames = 0
+                            speech_started = False
+                            silence_frames = 0
+                            peak_energy = 0
+                        
+            except queue.Empty:
+                await asyncio.sleep(0.01)
+                continue
+            except Exception as e:
+                logger.error(f"Error in audio recording: {e}")
+                break
+        
+        if not frames or speech_frames < min_speech_frames:
+            return None
+        
+        # Final peak energy check
+        if peak_energy < noise_floor * 1.5:
+            logger.info(f"Rejecting low-energy audio (peak: {peak_energy:.4f})")
+            return None
+        
+        # Convert frames to WAV
+        wav_buffer = io.BytesIO()
+        try:
             with sf.SoundFile(
                 wav_buffer,
                 mode="w",
-                samplerate=fs,
+                samplerate=self.sample_rate,
                 channels=1,
                 subtype="PCM_16",
                 format="WAV"
             ) as sound_file:
-                
-                while not stop_event.is_set():
-                    try:
-                        data = audio_queue.get(timeout=0.1)
-                        sound_file.buffer_write(data, dtype="int16")
-                    except queue.Empty:
-                        continue
-                    except Exception as e:
-                        logger.error(f"Error writing audio data: {e}")
-                        break
-                        
-    except Exception as e:
-        logger.error(f"Audio recording error: {e}")
-        return None
-    finally:
-        kb_listener.join()
-    
-    wav_buffer.seek(0)
-    
-    # Validate audio size
-    if len(wav_buffer.getbuffer()) < config.min_audio_size:
-        logger.info("Audio too short - hold space longer")
-        return None
+                for frame in frames:
+                    sound_file.buffer_write(frame, dtype="int16")
+        except Exception as e:
+            logger.error(f"Error creating WAV file: {e}")
+            return None
         
-    wav_buffer.name = "speech.wav"  # Hint for multipart encoder
-    return wav_buffer
+        wav_buffer.seek(0)
+        wav_buffer.name = "speech.wav"
+        return wav_buffer
+
+# Global audio recorder
+audio_recorder = ContinuousAudioRecorder(config.sample_rate)
 
 ################################################################################
-# MCP Client management with reconnection
+# MCP Client management with subprocess control
 ################################################################################
 
 @asynccontextmanager
 async def get_mcp_client():
-    """Context manager for MCP client with automatic reconnection"""
+    """Context manager for MCP client with subprocess management"""
     server_path = os.path.abspath(
         os.path.join(os.path.dirname(__file__), "..", "mcp_os", "server.py")
     )
     
     client = None
     try:
+        # Start the MCP server as a subprocess if not already running
+        if not state.mcp_process or state.mcp_process.poll() is not None:
+            logger.info(f"Starting MCP server: {server_path}")
+            state.mcp_process = subprocess.Popen(
+                [sys.executable, server_path],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            # Give the server time to start
+            await asyncio.sleep(1)
+        
         client = Client(server_path)
         async with client:
             logger.info("MCP client connected successfully")
@@ -377,7 +538,6 @@ async def call_tool_with_timeout(mcp_client: Client, call) -> str:
     try:
         # Execute with timeout
         result = await asyncio.wait_for(execute_tool(), timeout=config.tool_timeout)
-        logger.info(f"Tool {name} -> result: {result!r}")   
         logger.info(f"Tool {name} completed successfully")
         return result
     except asyncio.TimeoutError:
@@ -390,12 +550,14 @@ async def call_tool_with_timeout(mcp_client: Client, call) -> str:
 ################################################################################
 
 async def transcribe_audio(audio_buffer: io.BytesIO) -> Optional[str]:
-    """Transcribe audio with retry logic"""
+    """Transcribe audio with retry logic and validation"""
     async def do_transcribe():
         try:
+            # Force English language hint
             response = state.openai_client.audio.transcriptions.create(
                 model=config.stt_model,
-                file=audio_buffer
+                file=audio_buffer,
+                language="en"  # Force English transcription
             )
             return response.text.strip()
         except Exception as e:
@@ -404,28 +566,107 @@ async def transcribe_audio(audio_buffer: io.BytesIO) -> Optional[str]:
     
     try:
         text = await retry_with_backoff(do_transcribe())
-        logger.info(f"Transcribed: {text[:100]}...")
+        
+        # Validate transcription
+        if not text or len(text.strip()) == 0:
+            logger.info("Empty transcription, ignoring")
+            return None
+        
+        # Enhanced noise patterns - common false positives
+        noise_patterns = [
+            # Common STT artifacts
+            "Thank you.", "Thanks for watching!", "Bye!", "Thanks.", 
+            "Thank you for watching.", "Please subscribe.", "Bye-bye",
+            "Hello?", "Yeah.", "Uh-huh.", "Mm-hmm.", "Okay.", "Alright.",
+            
+            # Music/media artifacts  
+            "[Music]", "[Applause]", "[Laughter]", "[MUSIC]", "[music]",
+            "♪", "♫", "♪♪", "♬", "♩",
+            
+            # Foreign language false positives
+            "음악", "音楽", "嗯", "啊", "呃", "哦", "是", "的",
+            "ありがとう", "こんにちは", "さようなら",
+            "Merci", "Bonjour", "Au revoir", "Gracias", "Hola",
+            
+            # Single characters/punctuation
+            "you", "the", "a", ".", ",", "!", "?", "-", "...",
+            
+            # Common background noise transcriptions
+            "Shh", "Shh.", "Shhh", "Hmm", "Hmm.", "Hm",
+            "background noise", "inaudible", "[inaudible]",
+            
+            # Media playback artifacts
+            "playing", "music playing", "video playing",
+            "Transcribed by", "Subtitles by", "Captions by"
+        ]
+        
+        # Check exact matches (case-insensitive)
+        if text.strip().lower() in [p.lower() for p in noise_patterns]:
+            logger.info(f"Ignoring noise transcription: {text}")
+            return None
+        
+        # Check if it's mostly punctuation or special characters
+        alpha_chars = sum(c.isalpha() for c in text)
+        if alpha_chars < len(text) * 0.5:  # Less than 50% letters
+            logger.info(f"Ignoring non-text transcription: {text}")
+            return None
+        
+        # Check minimum word count
+        words = [w for w in text.split() if w.strip() and any(c.isalpha() for c in w)]
+        if len(words) < config.min_confidence_length:
+            logger.info(f"Transcription too short ({len(words)} words): {text}")
+            return None
+        
+        # Check for repeated characters (often indicates noise)
+        if len(set(text.replace(" ", ""))) < 3:
+            logger.info(f"Ignoring repetitive transcription: {text}")
+            return None
+        
+        # Check for non-English characters (basic check)
+        non_ascii_chars = sum(1 for c in text if ord(c) > 127)
+        if non_ascii_chars > len(text) * 0.3:  # More than 30% non-ASCII
+            logger.info(f"Ignoring non-English transcription: {text}")
+            return None
+        
+        # Language detection using simple heuristics
+        common_english_words = {"the", "is", "are", "and", "or", "but", "in", "on", "at", 
+                               "to", "for", "of", "with", "as", "by", "that", "this",
+                               "what", "how", "when", "where", "why", "who", "which",
+                               "can", "will", "would", "should", "could", "have", "has", 
+                               "launch", "open", "start", "play", "run", "create", "delete", "edit", "save"   }
+        
+        words_lower = [w.lower() for w in words]
+        english_word_count = sum(1 for w in words_lower if w in common_english_words)
+        
+        # Require at least one common English word for short phrases
+        if len(words) < 10 and english_word_count == 0:
+            logger.info(f"No common English words found in short phrase: {text}")
+            return None
+        
+        logger.info(f"Valid transcription: {text[:100]}...")
         return text
+        
     except Exception as e:
         logger.error(f"Failed to transcribe after retries: {e}")
         return None
 
 ################################################################################
-# TTS with error handling
+# TTS with interruption support
 ################################################################################
 
 async def speak_text(text: str) -> bool:
-    """Convert text to speech and play it"""
+    """Convert text to speech and play it with interruption support"""
     if not text or text.isspace():
         text = "Okay."
     
-    print(f"[DEBUG] speak_text called with: '{text}'")  # Console debug
+    # Clear any previous interrupt flag
+    state.interrupt_flag.clear()
+    state.is_speaking = True
     
     try:
         logger.info(f"Speaking: {text[:50]}...")
-        print(f"[DEBUG] About to call OpenAI TTS...")
         
-        # Generate speech - run in executor since it's blocking
+        # Generate speech
         loop = asyncio.get_event_loop()
         audio_response = await loop.run_in_executor(
             None, 
@@ -437,43 +678,180 @@ async def speak_text(text: str) -> bool:
             )
         )
         
-        print(f"[DEBUG] TTS response received, size: {len(audio_response.read())} bytes")
+        # Check for interruption before playing
+        if state.interrupt_flag.is_set():
+            logger.info("Speech interrupted before playback")
+            return False
         
-        # Reset the response for reading
-        audio_response.seek(0) if hasattr(audio_response, 'seek') else None
+        # Try different audio playback methods
+        audio_data = audio_response.read()
+        success = False
         
-        # Play audio - also run in executor
-        def play_audio():
-            print(f"[DEBUG] Starting audio playback...")
-            audio_buffer = io.BytesIO(audio_response.read())
-            print(f"[DEBUG] Audio buffer size: {len(audio_buffer.getvalue())} bytes")
+        # Method 1: Try sounddevice first
+        try:
+            def play_with_sounddevice():
+                audio_buffer = io.BytesIO(audio_data)
+                data, sample_rate = sf.read(audio_buffer, dtype="float32")
+                
+                # Try to use default output device
+                try:
+                    sd.default.device = None  # Reset to default
+                    sd.play(data, sample_rate)
+                    sd.wait()
+                    return True
+                except sd.PortAudioError:
+                    # Try alternative device
+                    devices = sd.query_devices()
+                    for i, device in enumerate(devices):
+                        if device['max_output_channels'] > 0:
+                            try:
+                                sd.default.device = i
+                                sd.play(data, sample_rate)
+                                sd.wait()
+                                return True
+                            except:
+                                continue
+                    return False
             
-            data, sample_rate = sf.read(audio_buffer, dtype="float32")
-            print(f"[DEBUG] Audio data shape: {data.shape}, sample rate: {sample_rate}")
+            success = await loop.run_in_executor(None, play_with_sounddevice)
             
-            print(f"[DEBUG] Playing audio...")
-            sd.play(data, sample_rate)
-            sd.wait()  # Wait for completion
-            print(f"[DEBUG] Audio playback completed")
+        except Exception as e:
+            logger.warning(f"Sounddevice playback failed: {e}")
         
-        await loop.run_in_executor(None, play_audio)
+        # Method 2: Fallback to pygame if available
+        if not success and PYGAME_AVAILABLE:
+            try:
+                def play_with_pygame():
+                    # Save to temporary file
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                        tmp_file.write(audio_data)
+                        tmp_path = tmp_file.name
+                    
+                    # Play with pygame
+                    pygame.mixer.music.load(tmp_path)
+                    pygame.mixer.music.play()
+                    
+                    # Wait for completion with interruption check
+                    while pygame.mixer.music.get_busy():
+                        if state.interrupt_flag.is_set():
+                            pygame.mixer.music.stop()
+                            os.unlink(tmp_path)
+                            return False
+                        time.sleep(0.1)
+                    
+                    os.unlink(tmp_path)
+                    return True
+                
+                success = await loop.run_in_executor(None, play_with_pygame)
+                if success:
+                    logger.info("Audio played using pygame fallback")
+                    
+            except Exception as e:
+                logger.warning(f"Pygame playback failed: {e}")
+        
+        # Method 3: System command fallback (Windows)
+        if not success and sys.platform == "win32":
+            try:
+                import tempfile
+                import winsound
+                
+                def play_with_winsound():
+                    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+                        tmp_file.write(audio_data)
+                        tmp_path = tmp_file.name
+                    
+                    winsound.PlaySound(tmp_path, winsound.SND_FILENAME)
+                    os.unlink(tmp_path)
+                    return True
+                
+                success = await loop.run_in_executor(None, play_with_winsound)
+                if success:
+                    logger.info("Audio played using winsound fallback")
+                    
+            except Exception as e:
+                logger.warning(f"Winsound playback failed: {e}")
+        
+        if not success:
+            logger.error("All audio playback methods failed")
+            return False
+            
         logger.info("Audio playback completed")
         return True
         
     except Exception as e:
-        print(f"[DEBUG] TTS error: {e}")
         logger.error(f"TTS error: {e}")
-        import traceback
-        traceback.print_exc()
         return False
+    finally:
+        state.is_speaking = False
+
+################################################################################
+# Error handling and retry utilities
+################################################################################
+
+async def retry_with_backoff(coro, max_retries: int = None, base_delay: float = 1.0):
+    """Retry a coroutine with exponential backoff"""
+    if max_retries is None:
+        max_retries = config.max_retries
+        
+    for attempt in range(max_retries + 1):
+        try:
+            return await coro
+        except Exception as e:
+            if attempt == max_retries:
+                logger.error(f"Final retry attempt failed: {e}")
+                raise
+            
+            delay = base_delay * (2 ** attempt)
+            logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+            await asyncio.sleep(delay)
+
+################################################################################
+# Shutdown utilities
+################################################################################
+
+async def shutdown_system():
+    """Properly shut down both server and client"""
+    logger.info("Initiating system shutdown...")
+    
+    # Stop audio recording
+    audio_recorder.stop()
+    
+    # Close MCP client
+    if state.mcp_client:
+        try:
+            await state.mcp_client.close()
+        except Exception as e:
+            logger.error(f"Error closing MCP client: {e}")
+    
+    # Terminate MCP server subprocess
+    if state.mcp_process:
+        try:
+            logger.info("Terminating MCP server process...")
+            state.mcp_process.terminate()
+            
+            # Wait for graceful shutdown
+            try:
+                state.mcp_process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                logger.warning("MCP server didn't terminate gracefully, forcing kill...")
+                state.mcp_process.kill()
+                state.mcp_process.wait()
+            
+            logger.info("MCP server process terminated")
+        except Exception as e:
+            logger.error(f"Error terminating MCP server: {e}")
+    
+    state.running = False
+    logger.info("System shutdown complete")
 
 ################################################################################
 # Main conversation loop
 ################################################################################
 
 async def conversation_loop():
-    """Main conversation loop with comprehensive error handling"""
-    logger.info("Starting conversation loop")
+    """Main conversation loop with continuous listening"""
+    logger.info("Starting conversation loop with continuous listening")
     
     # Initialize conversation
     state.reset_conversation()
@@ -486,11 +864,17 @@ async def conversation_loop():
             logger.error(f"Failed to initialize OpenAI client: {e}")
             raise
     
+    # Start continuous audio recording
+    audio_recorder.start()
+    
     async with get_mcp_client() as mcp_client:
         state.mcp_client = mcp_client
         
         # Load tools
         tools = await get_tools(mcp_client)
+        
+        # Initial greeting
+        await speak_text("Hello! I'm listening. You can speak naturally, and I'll respond when you pause.")
         
         while state.running:
             try:
@@ -498,42 +882,40 @@ async def conversation_loop():
                     await asyncio.sleep(1)
                     continue
                 
-                # Record audio
-                loop = asyncio.get_event_loop()
-                audio_buffer = await loop.run_in_executor(None, record_until_space)
+                # Record audio until silence
+                audio_buffer = await audio_recorder.record_until_silence()
                 
                 if not audio_buffer:
                     continue
                 
-                logger.info("Transcribing audio...")
-                
                 # Transcribe
                 user_text = await transcribe_audio(audio_buffer)
                 if not user_text:
-                    await speak_text("Sorry, I didn't catch that.")
                     continue
                 
                 logger.info(f"User said: {user_text}")
                 
                 # Handle special commands
-                if user_text.lower().strip() in {"reset chat", "new chat", "clear history"}:
+                lower_text = user_text.lower().strip()
+                
+                if lower_text in {"reset chat", "new chat", "clear history"}:
                     state.reset_conversation()
                     await speak_text("Starting a new conversation.")
                     continue
                 
-                if user_text.lower().strip() in {"mute", "quiet", "stop listening"}:
+                if lower_text in {"mute", "quiet", "stop listening"}:
                     state.muted = True
                     await speak_text("I'm muted. Say 'unmute' to resume.")
                     continue
                 
-                if user_text.lower().strip() in {"unmute", "resume", "wake up"}:
+                if lower_text in {"unmute", "resume", "wake up"}:
                     state.muted = False
                     await speak_text("I'm listening again.")
                     continue
                 
-                if user_text.lower().strip() in {"exit", "quit", "goodbye", "shut down"}:
-                    await speak_text("Goodbye!")
-                    state.running = False
+                if any(phrase in lower_text for phrase in ["exit", "quit", "goodbye", "shut down", "shutdown"]):
+                    await speak_text("Goodbye! Shutting down the system...")
+                    await shutdown_system()
                     break
                 
                 # Add user message to history
@@ -555,7 +937,6 @@ async def conversation_loop():
                     
                     if choice.finish_reason == "tool_calls" and message.tool_calls:
                         # Handle tool calls
-                        # First add the assistant message with tool calls
                         state.conversation_history.append({
                             "role": "assistant",
                             "content": message.content,
@@ -573,7 +954,7 @@ async def conversation_loop():
                                 "content": tool_result
                             })
                         
-                        # Get the model's follow-up response after tool execution
+                        # Get the model's follow-up response
                         follow_up = state.openai_client.chat.completions.create(
                             model=config.chat_model,
                             messages=state.conversation_history,
@@ -584,7 +965,6 @@ async def conversation_loop():
                         follow_up_message = follow_up.choices[0].message
                         assistant_response = follow_up_message.content or "Task completed."
                         
-                        # Add the follow-up response to history
                         state.conversation_history.append({
                             "role": "assistant", 
                             "content": assistant_response
@@ -597,15 +977,8 @@ async def conversation_loop():
                             "content": assistant_response
                         })
                     
-                    # Speak the response
-                    print(f"[DEBUG] About to speak: '{assistant_response}'")
-                    logger.info(f"About to speak: '{assistant_response}'")
-                    speech_success = await speak_text(assistant_response)
-                    if not speech_success:
-                        print(f"[DEBUG] TTS failed!")
-                        logger.warning("TTS failed, but continuing conversation")
-                    else:
-                        print(f"[DEBUG] TTS succeeded!")
+                    # Speak the response (with interruption support)
+                    await speak_text(assistant_response)
                     
                 except Exception as e:
                     logger.error(f"Error in chat completion: {e}")
@@ -632,7 +1005,7 @@ async def run_forever():
             
         except KeyboardInterrupt:
             logger.info("Received keyboard interrupt, shutting down...")
-            state.running = False
+            await shutdown_system()
             break
             
         except Exception as e:
@@ -649,9 +1022,9 @@ async def run_forever():
 def signal_handler(signum, frame):
     """Handle Ctrl-C / SIGTERM gracefully."""
     logger.info(f"Received signal {signum}; shutting down…")
-    state.running = False                      # let run_forever() exit
+    state.running = False
     loop = asyncio.get_event_loop()
-    loop.call_soon_threadsafe(loop.stop)       # in case we’re waiting in await
+    loop.call_soon_threadsafe(loop.stop)
 
 def main():
     """Main entry point"""
@@ -661,6 +1034,7 @@ def main():
     
     logger.info("Voice Assistant starting up...")
     logger.info(f"Configuration: STT={config.stt_model}, Chat={config.chat_model}, TTS={config.tts_model}")
+    logger.info("Mode: Always listening (continuous)")
     
     try:
         asyncio.run(run_forever())
