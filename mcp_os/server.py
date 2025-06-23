@@ -31,13 +31,41 @@ APPS = {
     "windows settings": ["ms-settings:"],
 
     # For Office apps, we'll use a different approach
-    "word": ["winword.exe", "start winword"],
-    "microsoft word": ["winword.exe", "start winword"],
-    "winword": ["winword.exe", "start winword"],
-    "excel": ["excel.exe", "start excel"],
-    "microsoft excel": ["excel.exe", "start excel"],
-    "powerpoint": ["powerpnt.exe", "start powerpnt"],
-    "outlook": ["outlook.exe", "start outlook"],
+    "word": [
+        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+        "winword.exe",
+        "start winword"
+    ],
+    "microsoft word": [
+        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+        "winword.exe",
+        "start winword"
+    ],
+    "winword": [
+        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
+        "winword.exe",
+        "start winword"
+    ],
+    "excel": [
+        r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
+        "excel.exe",
+        "start excel"
+    ],
+    "microsoft excel": [
+        r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
+        "excel.exe",
+        "start excel"
+    ],
+    "powerpoint": [
+        r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
+        "powerpnt.exe",
+        "start powerpnt"
+    ],
+    "outlook": [
+        r"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE",
+        "outlook.exe",
+        "start outlook"
+    ],
 
     # Common third-party apps with multiple possible names/paths
     "chrome": [
@@ -220,6 +248,7 @@ def launch_by_path(executable_path: str, args: str = "") -> str:
 def find_office_apps() -> str:
     """Try to locate Microsoft Office applications in common installation paths."""
     office_locations = [
+        r"C:\Program Files\Microsoft Office\root\Office16",
         r"C:\Program Files\Microsoft Office",
         r"C:\Program Files (x86)\Microsoft Office",
         r"C:\Program Files\Microsoft Office 15",
