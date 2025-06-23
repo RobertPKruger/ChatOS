@@ -5272,3 +5272,51 @@ RuntimeError: Event loop stopped before Future completed.
 2025-06-23 11:09:02,929 - __main__ - INFO - Ignoring short noise burst (3 frames)
 2025-06-23 11:10:21,284 - __main__ - INFO - Speech detected (energy: 19.3460, threshold: 0.5000)
 2025-06-23 11:10:22,852 - __main__ - INFO - Ignoring short noise burst (3 frames)
+2025-06-23 11:21:26,529 - __main__ - INFO - Available audio devices:
+2025-06-23 11:21:26,529 - __main__ - INFO -   0: Microsoft Sound Mapper - Input - In:2 Out:0
+2025-06-23 11:21:26,529 - __main__ - INFO -   1: Microphone Array (Realtek(R) Au - In:4 Out:0
+2025-06-23 11:21:26,529 - __main__ - INFO -   2: Microsoft Sound Mapper - Output - In:0 Out:2
+2025-06-23 11:21:26,529 - __main__ - INFO -   3: Speakers (Realtek(R) Audio) - In:0 Out:2
+2025-06-23 11:21:26,529 - __main__ - INFO -   4: Primary Sound Capture Driver - In:2 Out:0
+2025-06-23 11:21:26,529 - __main__ - INFO -   5: Microphone Array (Realtek(R) Audio) - In:4 Out:0
+2025-06-23 11:21:26,530 - __main__ - INFO -   6: Primary Sound Driver - In:0 Out:2
+2025-06-23 11:21:26,530 - __main__ - INFO -   7: Speakers (Realtek(R) Audio) - In:0 Out:2
+2025-06-23 11:21:26,530 - __main__ - INFO -   8: Speakers (Realtek(R) Audio) - In:0 Out:2
+2025-06-23 11:21:26,530 - __main__ - INFO -   9: Microphone Array (Realtek(R) Audio) - In:4 Out:0
+2025-06-23 11:21:26,530 - __main__ - INFO -   10: Headphones 1 (Realtek HD Audio 2nd output with SST) - In:0 Out:2
+2025-06-23 11:21:26,530 - __main__ - INFO -   11: Headphones 2 (Realtek HD Audio 2nd output with SST) - In:0 Out:2
+2025-06-23 11:21:26,531 - __main__ - INFO -   12: PC Speaker (Realtek HD Audio 2nd output with SST) - In:2 Out:0
+2025-06-23 11:21:26,531 - __main__ - INFO -   13: Speakers 1 (Realtek HD Audio output with SST) - In:0 Out:2
+2025-06-23 11:21:26,531 - __main__ - INFO -   14: Speakers 2 (Realtek HD Audio output with SST) - In:0 Out:2
+2025-06-23 11:21:26,531 - __main__ - INFO -   15: PC Speaker (Realtek HD Audio output with SST) - In:2 Out:0
+2025-06-23 11:21:26,531 - __main__ - INFO -   16: Microphone (Realtek HD Audio Mic input) - In:2 Out:0
+2025-06-23 11:21:26,531 - __main__ - INFO -   17: Microphone Array (Realtek HD Audio Mic Array input) - In:4 Out:0
+2025-06-23 11:21:26,531 - __main__ - INFO -   18: Headphones () - In:0 Out:2
+2025-06-23 11:21:26,532 - __main__ - INFO - Voice Assistant starting up...
+2025-06-23 11:21:26,532 - __main__ - INFO - Configuration: STT=gpt-4o-transcribe, Chat=gpt-4o, TTS=tts-1
+2025-06-23 11:21:26,532 - __main__ - INFO - Mode: Always listening (continuous)
+2025-06-23 11:21:26,533 - __main__ - INFO - Starting voice assistant (restart #0)
+2025-06-23 11:21:26,533 - __main__ - INFO - Starting conversation loop with continuous listening
+2025-06-23 11:21:26,533 - __main__ - INFO - Conversation history reset
+2025-06-23 11:21:27,158 - __main__ - INFO - Started continuous audio recording
+2025-06-23 11:21:27,158 - __main__ - INFO - Starting MCP server: C:\Users\comma\Projects\ChatOS\mcp_os\server.py
+2025-06-23 11:21:28,700 - __main__ - INFO - MCP client connected successfully
+2025-06-23 11:21:28,703 - __main__ - INFO - Loaded 19 tools
+2025-06-23 11:21:28,703 - __main__ - INFO - Speaking: Hello! I'm listening. You can speak naturally, and...
+2025-06-23 11:21:36,690 - __main__ - INFO - Audio playback completed
+2025-06-23 11:21:36,690 - __main__ - INFO - Listening for speech...
+2025-06-23 11:21:36,693 - __main__ - INFO - Speech detected (energy: 22.4091, threshold: 0.5000)
+2025-06-23 11:21:36,694 - __main__ - INFO - Ignoring short noise burst (3 frames)
+2025-06-23 11:21:36,695 - __main__ - INFO - Speech detected (energy: 13.5582, threshold: 0.5000)
+2025-06-23 11:21:36,696 - __main__ - INFO - Ignoring short noise burst (3 frames)
+2025-06-23 11:22:05,460 - __main__ - INFO - Speech detected (energy: 202.8009, threshold: 0.5000)
+2025-06-23 11:22:10,286 - __main__ - INFO - Silence detected after 110 speech frames (peak energy: 1227.8573)
+2025-06-23 11:22:12,416 - __main__ - INFO - Valid transcription: Please open Age of Mythology in Steam for me....
+2025-06-23 11:22:12,416 - __main__ - INFO - User said: Please open Age of Mythology in Steam for me.
+2025-06-23 11:22:14,100 - __main__ - INFO - Calling tool: launch_steam_game with args: {'game_name': 'Age of Mythology'}
+2025-06-23 11:22:14,111 - __main__ - INFO - Tool launch_steam_game completed successfully
+2025-06-23 11:22:15,782 - __main__ - INFO - Speaking: I've launched Age of Mythology: Extended Edition f...
+2025-06-23 11:22:22,260 - __main__ - INFO - Audio playback completed
+2025-06-23 11:22:22,260 - __main__ - INFO - Listening for speech...
+2025-06-23 11:22:34,487 - __main__ - INFO - Speech detected (energy: 27.1659, threshold: 0.5000)
+2025-06-23 11:22:36,046 - __main__ - INFO - Ignoring short noise burst (3 frames)
