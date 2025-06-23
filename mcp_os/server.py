@@ -43,14 +43,15 @@ APPS = {
     "chrome": [
         "chrome.exe",
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        "start chrome"
     ],
     "firefox": [
         "firefox.exe", 
         r"C:\Program Files\Mozilla Firefox\firefox.exe",
         r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe"
     ],
-    "edge": ["msedge.exe", "microsoftedge.exe"],
+    "edge": ["msedge.exe", "microsoftedge.exe", "start msedge"],
     "code": [
         "code.exe",
         r"C:\Users\{username}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
@@ -99,22 +100,36 @@ def launch_app(app_name: str) -> str:
     if not executables:
         return f"Application '{app_name}' not found."
 
+    username = os.getenv('USERNAME', '')
+    
     for exe in executables:
         try:
             # Expand potential placeholders
-            path = exe.format(username=os.getlogin())
+            path = exe.replace('{username}', username)
+            
             # Protocol handlers (e.g. ms-settings:)
             if path.endswith(":"):
                 os.startfile(path)
-            # Absolute path or in PATH
+                return f"Launched '{app_name}'"
+                
+            # Handle 'start' commands (for Office apps)
+            elif path.startswith("start "):
+                # Use shell=True with string command for 'start' commands
+                subprocess.Popen(path, shell=True)
+                return f"Launched '{app_name}'"
+                
+            # Absolute path
             elif os.path.exists(path):
                 subprocess.Popen([path], shell=False)
-            else:
-                # Try shell launch (will search PATH)
-                subprocess.Popen([path], shell=True)
-            return f"Launched '{app_name}'"
+                return f"Launched '{app_name}'"
+                
+            # Try to find in PATH
+            elif shutil.which(path):
+                subprocess.Popen([path], shell=False)
+                return f"Launched '{app_name}'"
+                
         except Exception as e:
-            logging.logger.debug(f"Failed to launch '{exe}': {e}")
+            logging.debug(f"Failed to launch '{exe}': {e}")
             continue
 
     return f"Failed to launch '{app_name}'. Tried: {executables}"
@@ -196,10 +211,44 @@ def launch_by_path(executable_path: str, args: str = "") -> str:
         cmd = [executable_path]
         if args:
             cmd.extend(args.split())
-        subprocess.Popen(cmd, shell=True)
+        subprocess.Popen(cmd, shell=False)
         return str(f"Launched: {executable_path} {args}")
     except Exception as e:
         return str(f"Failed to launch: {str(e)}")
+
+@mcp.tool()
+def find_office_apps() -> str:
+    """Try to locate Microsoft Office applications in common installation paths."""
+    office_locations = [
+        r"C:\Program Files\Microsoft Office",
+        r"C:\Program Files (x86)\Microsoft Office",
+        r"C:\Program Files\Microsoft Office 15",
+        r"C:\Program Files\Microsoft Office 16",
+        r"C:\Program Files (x86)\Microsoft Office 15",
+        r"C:\Program Files (x86)\Microsoft Office 16",
+    ]
+    
+    office_apps = {
+        "winword.exe": "Microsoft Word",
+        "excel.exe": "Microsoft Excel",
+        "powerpnt.exe": "Microsoft PowerPoint",
+        "outlook.exe": "Microsoft Outlook"
+    }
+    
+    found_apps = []
+    
+    for base_path in office_locations:
+        if os.path.exists(base_path):
+            for root, dirs, files in os.walk(base_path):
+                for app_exe, app_name in office_apps.items():
+                    if app_exe in files:
+                        full_path = os.path.join(root, app_exe)
+                        found_apps.append(f"{app_name}: {full_path}")
+    
+    if found_apps:
+        return "Found Office applications:\n" + "\n".join(found_apps)
+    else:
+        return "No Office applications found in common locations"
 
 if __name__ == "__main__":
     # prints a one-line JSON schema, then listens for tool calls

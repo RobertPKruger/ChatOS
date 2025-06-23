@@ -4911,3 +4911,85 @@ RuntimeError: Event loop stopped before Future completed.
 2025-06-23 10:46:17,041 - __main__ - INFO - Ignoring short noise burst (3 frames)
 2025-06-23 10:46:20,701 - __main__ - INFO - Speech detected (energy: 25.6452, threshold: 0.5000)
 2025-06-23 10:46:22,266 - __main__ - INFO - Ignoring short noise burst (3 frames)
+2025-06-23 10:47:49,538 - __main__ - INFO - Available audio devices:
+2025-06-23 10:47:49,538 - __main__ - INFO -   0: Microsoft Sound Mapper - Input - In:2 Out:0
+2025-06-23 10:47:49,538 - __main__ - INFO -   1: Microphone Array (Realtek(R) Au - In:4 Out:0
+2025-06-23 10:47:49,538 - __main__ - INFO -   2: Microsoft Sound Mapper - Output - In:0 Out:2
+2025-06-23 10:47:49,538 - __main__ - INFO -   3: Speakers (Realtek(R) Audio) - In:0 Out:2
+2025-06-23 10:47:49,539 - __main__ - INFO -   4: Primary Sound Capture Driver - In:2 Out:0
+2025-06-23 10:47:49,539 - __main__ - INFO -   5: Microphone Array (Realtek(R) Audio) - In:4 Out:0
+2025-06-23 10:47:49,539 - __main__ - INFO -   6: Primary Sound Driver - In:0 Out:2
+2025-06-23 10:47:49,539 - __main__ - INFO -   7: Speakers (Realtek(R) Audio) - In:0 Out:2
+2025-06-23 10:47:49,539 - __main__ - INFO -   8: Speakers (Realtek(R) Audio) - In:0 Out:2
+2025-06-23 10:47:49,539 - __main__ - INFO -   9: Microphone Array (Realtek(R) Audio) - In:4 Out:0
+2025-06-23 10:47:49,539 - __main__ - INFO -   10: Headphones 1 (Realtek HD Audio 2nd output with SST) - In:0 Out:2
+2025-06-23 10:47:49,539 - __main__ - INFO -   11: Headphones 2 (Realtek HD Audio 2nd output with SST) - In:0 Out:2
+2025-06-23 10:47:49,539 - __main__ - INFO -   12: PC Speaker (Realtek HD Audio 2nd output with SST) - In:2 Out:0
+2025-06-23 10:47:49,539 - __main__ - INFO -   13: Speakers 1 (Realtek HD Audio output with SST) - In:0 Out:2
+2025-06-23 10:47:49,540 - __main__ - INFO -   14: Speakers 2 (Realtek HD Audio output with SST) - In:0 Out:2
+2025-06-23 10:47:49,540 - __main__ - INFO -   15: PC Speaker (Realtek HD Audio output with SST) - In:2 Out:0
+2025-06-23 10:47:49,540 - __main__ - INFO -   16: Microphone (Realtek HD Audio Mic input) - In:2 Out:0
+2025-06-23 10:47:49,540 - __main__ - INFO -   17: Microphone Array (Realtek HD Audio Mic Array input) - In:4 Out:0
+2025-06-23 10:47:49,540 - __main__ - INFO -   18: Headphones () - In:0 Out:2
+2025-06-23 10:47:49,540 - __main__ - INFO - Voice Assistant starting up...
+2025-06-23 10:47:49,540 - __main__ - INFO - Configuration: STT=gpt-4o-transcribe, Chat=gpt-4o, TTS=tts-1
+2025-06-23 10:47:49,540 - __main__ - INFO - Mode: Always listening (continuous)
+2025-06-23 10:47:49,541 - __main__ - INFO - Starting voice assistant (restart #0)
+2025-06-23 10:47:49,541 - __main__ - INFO - Starting conversation loop with continuous listening
+2025-06-23 10:47:49,541 - __main__ - INFO - Conversation history reset
+2025-06-23 10:47:50,573 - __main__ - INFO - Started continuous audio recording
+2025-06-23 10:47:50,573 - __main__ - INFO - Starting MCP server: C:\Users\comma\Projects\ChatOS\mcp_os\server.py
+2025-06-23 10:47:52,123 - __main__ - INFO - MCP client connected successfully
+2025-06-23 10:47:52,126 - __main__ - INFO - Loaded 18 tools
+2025-06-23 10:47:52,126 - __main__ - INFO - Speaking: Hello! I'm listening. You can speak naturally, and...
+2025-06-23 10:47:59,063 - __main__ - INFO - Audio playback completed
+2025-06-23 10:47:59,063 - __main__ - INFO - Listening for speech...
+2025-06-23 10:47:59,067 - __main__ - INFO - Speech detected (energy: 34.9458, threshold: 0.5000)
+2025-06-23 10:47:59,743 - __main__ - INFO - Ignoring short noise burst (7 frames)
+2025-06-23 10:48:01,031 - __main__ - INFO - Speech detected (energy: 216.1791, threshold: 0.5000)
+2025-06-23 10:48:04,446 - __main__ - INFO - Silence detected after 64 speech frames (peak energy: 386.9503)
+2025-06-23 10:48:05,629 - __main__ - INFO - Valid transcription: Open Microsoft Word, please...
+2025-06-23 10:48:05,629 - __main__ - INFO - User said: Open Microsoft Word, please
+2025-06-23 10:48:07,263 - __main__ - INFO - Speaking: I can't directly open Microsoft Word, but you can ...
+2025-06-23 10:48:23,481 - __main__ - INFO - Audio playback completed
+2025-06-23 10:48:23,481 - __main__ - INFO - Listening for speech...
+2025-06-23 10:48:24,876 - __main__ - INFO - Speech detected (energy: 67.8580, threshold: 0.5000)
+2025-06-23 10:48:28,392 - __main__ - INFO - Silence detected after 68 speech frames (peak energy: 483.1846)
+2025-06-23 10:48:30,001 - __main__ - INFO - Valid transcription: Launch Microsoft Word please....
+2025-06-23 10:48:30,001 - __main__ - INFO - User said: Launch Microsoft Word please.
+2025-06-23 10:48:31,364 - __main__ - INFO - Speaking: I can't directly open Microsoft Word for you, but ...
+2025-06-23 10:48:45,380 - __main__ - INFO - Audio playback completed
+2025-06-23 10:48:45,381 - __main__ - INFO - Listening for speech...
+2025-06-23 10:48:45,386 - __main__ - INFO - Speech detected (energy: 30.8263, threshold: 0.5000)
+2025-06-23 10:48:45,387 - __main__ - INFO - Ignoring short noise burst (9 frames)
+2025-06-23 10:48:46,811 - __main__ - INFO - Speech detected (energy: 20.4483, threshold: 0.5000)
+2025-06-23 10:48:50,346 - __main__ - INFO - Silence detected after 57 speech frames (peak energy: 645.3186)
+2025-06-23 10:48:52,025 - __main__ - INFO - Valid transcription: Launch Word please....
+2025-06-23 10:48:52,025 - __main__ - INFO - User said: Launch Word please.
+2025-06-23 10:48:54,132 - __main__ - INFO - Speaking: I can't directly open Microsoft Word, but you can ...
+2025-06-23 10:49:08,740 - __main__ - INFO - Audio playback completed
+2025-06-23 10:49:08,741 - __main__ - INFO - Listening for speech...
+2025-06-23 10:49:13,382 - __main__ - INFO - Speech detected (energy: 103.1883, threshold: 0.5000)
+2025-06-23 10:49:16,204 - __main__ - INFO - Silence detected after 45 speech frames (peak energy: 547.3466)
+2025-06-23 10:49:17,951 - __main__ - INFO - Valid transcription: Launch Chrome please....
+2025-06-23 10:49:17,951 - __main__ - INFO - User said: Launch Chrome please.
+2025-06-23 10:49:20,422 - __main__ - INFO - Speaking: I can't directly open Chrome, but you can find it ...
+2025-06-23 10:49:33,423 - __main__ - INFO - Audio playback completed
+2025-06-23 10:49:33,424 - __main__ - INFO - Listening for speech...
+2025-06-23 10:49:36,602 - __main__ - INFO - Speech detected (energy: 45.7443, threshold: 0.5000)
+2025-06-23 10:49:39,453 - __main__ - INFO - Silence detected after 46 speech frames (peak energy: 357.8824)
+2025-06-23 10:49:41,096 - __main__ - INFO - Valid transcription: Launch paint please....
+2025-06-23 10:49:41,096 - __main__ - INFO - User said: Launch paint please.
+2025-06-23 10:49:41,800 - __main__ - INFO - Calling tool: launch_app with args: {'app_name': 'paint'}
+2025-06-23 10:49:41,822 - __main__ - INFO - Tool launch_app completed successfully
+2025-06-23 10:49:42,667 - __main__ - INFO - Speaking: I've launched Paint for you. If you need anything ...
+2025-06-23 10:49:51,690 - __main__ - INFO - Audio playback completed
+2025-06-23 10:49:51,691 - __main__ - INFO - Listening for speech...
+2025-06-23 10:49:51,696 - __main__ - INFO - Speech detected (energy: 14.4735, threshold: 0.5000)
+2025-06-23 10:49:52,956 - __main__ - INFO - Ignoring short noise burst (3 frames)
+2025-06-23 10:51:21,403 - __main__ - INFO - Speech detected (energy: 20.7151, threshold: 0.5000)
+2025-06-23 10:51:23,706 - __main__ - INFO - Ignoring short noise burst (6 frames)
+2025-06-23 10:51:25,512 - __main__ - INFO - Speech detected (energy: 16.1164, threshold: 0.5000)
+2025-06-23 10:51:27,516 - __main__ - INFO - Ignoring short noise burst (6 frames)
+2025-06-23 10:51:30,791 - __main__ - INFO - Speech detected (energy: 23.9486, threshold: 0.5000)
+2025-06-23 10:51:32,346 - __main__ - INFO - Ignoring short noise burst (3 frames)
