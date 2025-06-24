@@ -13,12 +13,13 @@ mcp = FastMCP("local-os")
 import fs_tools
 fs_tools.register_fs_tools(mcp)
 
-# Global variable to store OS-specific apps
+# Global variables to store OS-specific apps and aliases
 APPS = {}
+ALIASES = {}
 
 def load_apps_config(config_path="apps_config.json"):
     """Load OS-specific application configurations from JSON file."""
-    global APPS
+    global APPS, ALIASES
     
     # Determine the current OS
     system = platform.system().lower()
@@ -51,15 +52,29 @@ def load_apps_config(config_path="apps_config.json"):
             logging.warning(f"No configuration found for OS: {current_os}")
             APPS = {}
             
+        # Load aliases if available
+        if "aliases" in config and current_os in config["aliases"]:
+            ALIASES = config["aliases"][current_os]
+            # Build reverse mapping for quick lookup
+            ALIASES_REVERSE = {}
+            for primary_name, alias_list in ALIASES.items():
+                for alias in alias_list:
+                    ALIASES_REVERSE[alias.lower()] = primary_name
+            ALIASES["_reverse"] = ALIASES_REVERSE
+            logging.info(f"Loaded {len(ALIASES)-1} alias groups for {current_os}")
+            
     except FileNotFoundError:
         logging.error(f"Configuration file not found: {config_path}")
         APPS = {}
+        ALIASES = {}
     except json.JSONDecodeError as e:
         logging.error(f"Invalid JSON in configuration file: {e}")
         APPS = {}
+        ALIASES = {}
     except Exception as e:
         logging.error(f"Error loading configuration: {e}")
         APPS = {}
+        ALIASES = {}
 
 # Load apps configuration on startup
 load_apps_config()
@@ -91,13 +106,34 @@ def find_executable(app_paths):
     
     return None
 
+def resolve_app_name(app_name: str) -> str:
+    """Resolve an app name or alias to the primary app name."""
+    lower_name = app_name.lower()
+    
+    # First check if it's already a primary app name
+    if lower_name in APPS:
+        return lower_name
+    
+    # Check if it's an alias
+    if "_reverse" in ALIASES and lower_name in ALIASES["_reverse"]:
+        return ALIASES["_reverse"][lower_name]
+    
+    # Return original if no match found
+    return lower_name
+
 @mcp.tool()
 def launch_app(app_name: str) -> str:
     """Attempts to launch the given application or protocol."""
-    key = app_name.lower()
-    executables = APPS.get(key)
+    # Resolve any aliases to the primary app name
+    resolved_name = resolve_app_name(app_name)
+    
+    executables = APPS.get(resolved_name)
     if not executables:
-        return f"Application '{app_name}' not found."
+        # Try to find similar apps for helpful error message
+        similar = find_similar_apps(app_name)
+        if similar:
+            return f"Application '{app_name}' not found. Did you mean: {', '.join(similar)}?"
+        return f"Application '{app_name}' not found. Use 'list_apps' to see available apps."
 
     username = os.getenv('USERNAME', '') if platform.system() == "Windows" else os.getenv('USER', '')
     errors = []
@@ -181,13 +217,78 @@ def test_app_availability() -> str:
     result += "\n\n=== UNAVAILABLE APPS ===\n"
     result += ", ".join(unavailable)
     
+    # Add alias information
+    if ALIASES and "_reverse" in ALIASES:
+        result += f"\n\n=== LOADED ALIASES ===\n"
+        result += f"Total aliases: {len(ALIASES['_reverse'])}"
+    
     return str(result)
+
+def find_similar_apps(app_name: str, threshold: float = 0.6) -> list:
+    """Find apps with similar names using simple string matching."""
+    similar = []
+    lower_name = app_name.lower()
+    
+    # Check all primary app names and aliases
+    all_names = list(APPS.keys())
+    if "_reverse" in ALIASES:
+        all_names.extend(ALIASES["_reverse"].keys())
+    
+    for name in all_names:
+        # Simple substring matching
+        if lower_name in name or name in lower_name:
+            similar.append(name)
+        # Check if they share significant characters
+        elif len(set(lower_name) & set(name)) > len(lower_name) * threshold:
+            similar.append(name)
+    
+    return list(set(similar))[:5]  # Return up to 5 suggestions
 
 @mcp.tool()
 def list_apps() -> str:
-    """List all available applications that can be launched."""
+    """List all available applications and their aliases."""
     apps = sorted(APPS.keys())
-    return str(f"Available applications on {platform.system()}: {', '.join(apps)}")
+    result = f"Available applications on {platform.system()}:\n\n"
+    
+    if ALIASES and "_reverse" in ALIASES:
+        # Group by primary app with aliases
+        for app in apps:
+            aliases = []
+            for alias, primary in ALIASES["_reverse"].items():
+                if primary == app and alias != app:
+                    aliases.append(alias)
+            
+            if aliases:
+                result += f"• {app} (aliases: {', '.join(sorted(aliases))})\n"
+            else:
+                result += f"• {app}\n"
+    else:
+        # Simple list if no aliases defined
+        result += ", ".join(apps)
+    
+    return result
+
+@mcp.tool()
+def search_app(query: str) -> str:
+    """Search for apps by name or alias."""
+    query_lower = query.lower()
+    matches = []
+    
+    # Search in primary app names
+    for app in APPS.keys():
+        if query_lower in app:
+            matches.append(f"{app} (primary)")
+    
+    # Search in aliases
+    if "_reverse" in ALIASES:
+        for alias, primary in ALIASES["_reverse"].items():
+            if query_lower in alias and alias not in matches:
+                matches.append(f"{alias} → {primary}")
+    
+    if matches:
+        return f"Found {len(matches)} matches for '{query}':\n" + "\n".join(matches)
+    else:
+        return f"No apps found matching '{query}'"
 
 @mcp.tool()
 def open_folder(path: str = None) -> str:

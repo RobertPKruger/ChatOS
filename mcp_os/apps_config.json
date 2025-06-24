@@ -1,4 +1,31 @@
 {
+  "aliases": {
+    "windows": {
+      "notepad": ["notepad", "notes", "note", "text editor", "texteditor"],
+      "calculator": ["calc", "calculator", "calculations", "math"],
+      "explorer": ["explorer", "file explorer", "files", "folder", "folders", "file manager"],
+      "cmd": ["cmd", "command prompt", "command", "console", "terminal"],
+      "powershell": ["powershell", "ps", "pwsh", "power shell"],
+      "chrome": ["chrome", "google chrome", "browser", "web browser", "internet"],
+      "excel": ["excel", "microsoft excel", "spreadsheet", "sheets"],
+      "word": ["word", "microsoft word", "winword", "document", "docs"],
+      "outlook": ["outlook", "email", "mail", "microsoft outlook"],
+      "code": ["code", "vscode", "visual studio code", "vs code", "editor"]
+    },
+    "darwin": {
+      "terminal": ["terminal", "term", "console", "command line", "shell"],
+      "safari": ["safari", "browser", "web browser", "internet"],
+      "finder": ["finder", "files", "file manager", "explorer"],
+      "chrome": ["chrome", "google chrome", "browser"],
+      "code": ["code", "vscode", "visual studio code", "vs code", "editor"]
+    },
+    "linux": {
+      "terminal": ["terminal", "term", "console", "shell", "command line"],
+      "firefox": ["firefox", "browser", "web browser", "internet"],
+      "chrome": ["chrome", "google chrome", "chromium", "browser"],
+      "code": ["code", "vscode", "visual studio code", "vs code", "editor"]
+    }
+  },
   "windows": {
     "notepad": ["notepad.exe"],
     "calculator": ["calc.exe", "calculator.exe"],
