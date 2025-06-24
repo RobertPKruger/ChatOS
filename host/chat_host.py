@@ -874,7 +874,7 @@ async def conversation_loop():
         tools = await get_tools(mcp_client)
         
         # Initial greeting
-        await speak_text("Hello! I'm listening. You can speak naturally, and I'll respond when you pause.")
+        await speak_text("Hello! I'm listening.")
         
         while state.running:
             try:

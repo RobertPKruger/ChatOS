@@ -1,7 +1,11 @@
 from mcp.server.fastmcp import FastMCP
-from mcp.types import TextContent  # Import TextContent explicitly
-import subprocess, os, pathlib, shutil
-import winreg  # For registry lookups on Windows
+from mcp.types import TextContent
+import subprocess
+import os
+import pathlib
+import shutil
+import platform
+import json
 import logging
 
 mcp = FastMCP("local-os")
@@ -9,106 +13,73 @@ mcp = FastMCP("local-os")
 import fs_tools
 fs_tools.register_fs_tools(mcp)
 
-# Updated APPS dictionary with multiple potential paths
-APPS = {
-    "notepad": ["notepad.exe"],
-    "calculator": ["calc.exe", "calculator.exe"],
-    "calc": ["calc.exe", "calculator.exe"],
-    "explorer": ["explorer.exe"],
-    "file explorer": ["explorer.exe"],
-    "cmd": ["cmd.exe"],
-    "command prompt": ["cmd.exe"],
-    "powershell": ["powershell.exe", "pwsh.exe"],  # pwsh for PowerShell 7+
-    "paint": ["mspaint.exe"],
-    "wordpad": ["wordpad.exe"],
-    "task manager": ["taskmgr.exe"],
-    "taskmgr": ["taskmgr.exe"],
-    "control panel": ["control.exe"],
-    "regedit": ["regedit.exe"],
-    "registry editor": ["regedit.exe"],
-    # Special protocols
-    "settings": ["ms-settings:"],
-    "windows settings": ["ms-settings:"],
+# Global variable to store OS-specific apps
+APPS = {}
 
-    # For Office apps, we'll use a different approach
-    "word": [
-        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
-        "winword.exe",
-        "start winword"
-    ],
-    "microsoft word": [
-        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
-        "winword.exe",
-        "start winword"
-    ],
-    "winword": [
-        r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE",
-        "winword.exe",
-        "start winword"
-    ],
-    "excel": [
-        r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
-        "excel.exe",
-        "start excel"
-    ],
-    "microsoft excel": [
-        r"C:\Program Files\Microsoft Office\root\Office16\EXCEL.EXE",
-        "excel.exe",
-        "start excel"
-    ],
-    "powerpoint": [
-        r"C:\Program Files\Microsoft Office\root\Office16\POWERPNT.EXE",
-        "powerpnt.exe",
-        "start powerpnt"
-    ],
-    "outlook": [
-        r"C:\Program Files\Microsoft Office\root\Office16\OUTLOOK.EXE",
-        "outlook.exe",
-        "start outlook"
-    ],
+def load_apps_config(config_path="apps_config.json"):
+    """Load OS-specific application configurations from JSON file."""
+    global APPS
+    
+    # Determine the current OS
+    system = platform.system().lower()
+    
+    # Map platform.system() values to our config keys
+    os_map = {
+        "windows": "windows",
+        "darwin": "darwin",  # macOS
+        "linux": "linux"
+    }
+    
+    current_os = os_map.get(system, "linux")  # Default to linux if unknown
+    
+    try:
+        # Try to load from the same directory as the script
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        config_file = os.path.join(script_dir, config_path)
+        
+        if not os.path.exists(config_file):
+            # Try current working directory
+            config_file = config_path
+            
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+            
+        if current_os in config:
+            APPS = config[current_os]
+            logging.info(f"Loaded {len(APPS)} apps for {current_os}")
+        else:
+            logging.warning(f"No configuration found for OS: {current_os}")
+            APPS = {}
+            
+    except FileNotFoundError:
+        logging.error(f"Configuration file not found: {config_path}")
+        APPS = {}
+    except json.JSONDecodeError as e:
+        logging.error(f"Invalid JSON in configuration file: {e}")
+        APPS = {}
+    except Exception as e:
+        logging.error(f"Error loading configuration: {e}")
+        APPS = {}
 
-    # Common third-party apps with multiple possible names/paths
-    "chrome": [
-        "chrome.exe",
-        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-        "start chrome"
-    ],
-    "firefox": [
-        "firefox.exe", 
-        r"C:\Program Files\Mozilla Firefox\firefox.exe",
-        r"C:\Program Files (x86)\Mozilla Firefox\firefox.exe"
-    ],
-    "edge": ["msedge.exe", "microsoftedge.exe", "start msedge"],
-    "code": [
-        "code.exe",
-        r"C:\Users\{username}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
-        r"C:\Program Files\Microsoft VS Code\Code.exe"
-    ],
-    "vscode": [
-        "code.exe",
-        r"C:\Users\{username}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
-        r"C:\Program Files\Microsoft VS Code\Code.exe"
-    ],
-    "visual studio code": [
-        "code.exe",
-        r"C:\Users\{username}\AppData\Local\Programs\Microsoft VS Code\Code.exe",
-        r"C:\Program Files\Microsoft VS Code\Code.exe"
-    ],
-}
+# Load apps configuration on startup
+load_apps_config()
 
 def find_executable(app_paths):
     """Find the first available executable from a list of possible paths."""
-    username = os.getenv('USERNAME', '')
+    username = os.getenv('USERNAME', '') if platform.system() == "Windows" else os.getenv('USER', '')
     
     for path in app_paths:
-        # Handle special protocols
+        # Handle special protocols (Windows)
         if path.startswith("ms-"):
             return path
             
         # Replace {username} placeholder
         if '{username}' in path:
             path = path.replace('{username}', username)
+            
+        # For macOS 'open' commands, return the full command list
+        if platform.system() == "Darwin" and isinstance(app_paths, list) and len(app_paths) > 1 and app_paths[0] == "open":
+            return app_paths
             
         # First try to find in PATH
         if not os.path.sep in path:  # It's just an executable name
@@ -128,42 +99,61 @@ def launch_app(app_name: str) -> str:
     if not executables:
         return f"Application '{app_name}' not found."
 
-    username = os.getenv('USERNAME', '')
+    username = os.getenv('USERNAME', '') if platform.system() == "Windows" else os.getenv('USER', '')
     errors = []
     
-    for exe in executables:
+    # Handle macOS 'open' command format
+    if platform.system() == "Darwin" and isinstance(executables, list) and len(executables) > 1 and executables[0] == "open":
+        try:
+            subprocess.Popen(executables)
+            return f"Launched '{app_name}'"
+        except Exception as e:
+            return f"Failed to launch '{app_name}': {str(e)}"
+    
+    # Handle single executable or list of alternatives
+    exe_list = executables if isinstance(executables, list) else [executables]
+    
+    for exe in exe_list:
         try:
             # Expand potential placeholders
             path = exe.replace('{username}', username)
             
-            # Protocol handlers (e.g. ms-settings:)
-            if path.endswith(":"):
-                os.startfile(path)
-                return f"Launched '{app_name}'"
-                
-            # Handle 'start' commands (for Office apps)
-            elif path.startswith("start "):
-                # Use shell=True with string command for 'start' commands
-                subprocess.Popen(path, shell=True)
-                return f"Launched '{app_name}'"
-                
-            # Absolute path - check if it exists first
-            elif os.path.isabs(path):
-                if os.path.exists(path):
-                    # For absolute paths, use os.startfile on Windows
+            # Windows-specific handling
+            if platform.system() == "Windows":
+                # Protocol handlers (e.g. ms-settings:)
+                if path.endswith(":"):
                     os.startfile(path)
-                    return f"Launched '{app_name}' from {path}"
-                else:
-                    errors.append(f"Path not found: {path}")
-                    continue
+                    return f"Launched '{app_name}'"
                     
-            # Try to find in PATH
-            elif shutil.which(path):
-                subprocess.Popen([path], shell=False)
-                return f"Launched '{app_name}'"
+                # Handle 'start' commands (for Office apps)
+                elif path.startswith("start "):
+                    subprocess.Popen(path, shell=True)
+                    return f"Launched '{app_name}'"
+                    
+                # Absolute path - check if it exists first
+                elif os.path.isabs(path):
+                    if os.path.exists(path):
+                        os.startfile(path)
+                        return f"Launched '{app_name}' from {path}"
+                    else:
+                        errors.append(f"Path not found: {path}")
+                        continue
+                        
+                # Try to find in PATH
+                elif shutil.which(path):
+                    subprocess.Popen([path], shell=False)
+                    return f"Launched '{app_name}'"
+                else:
+                    errors.append(f"Not found in PATH: {path}")
+                    
+            # Linux/Unix handling
             else:
-                errors.append(f"Not found in PATH: {path}")
-                
+                if shutil.which(path) or os.path.exists(path):
+                    subprocess.Popen([path], shell=False)
+                    return f"Launched '{app_name}'"
+                else:
+                    errors.append(f"Not found: {path}")
+                    
         except Exception as e:
             errors.append(f"Failed to launch '{exe}': {str(e)}")
             continue
@@ -179,11 +169,14 @@ def test_app_availability() -> str:
     for app_name, app_paths in APPS.items():
         exe = find_executable(app_paths)
         if exe:
-            available.append(f"{app_name} -> {exe}")
+            if isinstance(exe, list):
+                available.append(f"{app_name} -> {' '.join(exe)}")
+            else:
+                available.append(f"{app_name} -> {exe}")
         else:
             unavailable.append(app_name)
     
-    result = "=== AVAILABLE APPS ===\n"
+    result = f"=== AVAILABLE APPS ({platform.system()}) ===\n"
     result += "\n".join(available)
     result += "\n\n=== UNAVAILABLE APPS ===\n"
     result += ", ".join(unavailable)
@@ -194,11 +187,11 @@ def test_app_availability() -> str:
 def list_apps() -> str:
     """List all available applications that can be launched."""
     apps = sorted(APPS.keys())
-    return str(f"Available applications: {', '.join(apps)}")
+    return str(f"Available applications on {platform.system()}: {', '.join(apps)}")
 
 @mcp.tool()
 def open_folder(path: str = None) -> str:
-    """Open a folder in Windows Explorer.
+    """Open a folder in the system's file manager.
     
     Args:
         path: Path to the folder to open (optional, defaults to user's home folder)
@@ -210,7 +203,16 @@ def open_folder(path: str = None) -> str:
         # Expand environment variables and resolve path
         full_path = os.path.expandvars(os.path.expanduser(path))
         if os.path.exists(full_path):
-            subprocess.Popen(f'explorer "{full_path}"', shell=True)
+            if platform.system() == "Windows":
+                subprocess.Popen(f'explorer "{full_path}"', shell=True)
+            elif platform.system() == "Darwin":  # macOS
+                subprocess.Popen(["open", full_path])
+            else:  # Linux/Unix
+                # Try common file managers
+                for fm in ["xdg-open", "nautilus", "dolphin", "thunar", "pcmanfm"]:
+                    if shutil.which(fm):
+                        subprocess.Popen([fm, full_path])
+                        break
             return str(f"Opened folder: {full_path}")
         else:
             return str(f"Folder does not exist: {full_path}")
@@ -225,17 +227,37 @@ def launch_by_path(executable_path: str, args: str = "") -> str:
         executable_path: Full path to the executable
         args: Optional command line arguments
     """
-    # Safety check - only allow .exe files in common directories
-    allowed_dirs = [
-        "C:\\Windows\\System32",
-        "C:\\Windows",
-        "C:\\Program Files",
-        "C:\\Program Files (x86)",
-        os.path.expanduser("~\\AppData")
-    ]
-    
-    if not executable_path.lower().endswith('.exe'):
-        return str("Only .exe files are allowed")
+    # OS-specific safety checks
+    if platform.system() == "Windows":
+        allowed_dirs = [
+            "C:\\Windows\\System32",
+            "C:\\Windows",
+            "C:\\Program Files",
+            "C:\\Program Files (x86)",
+            os.path.expanduser("~\\AppData")
+        ]
+        
+        if not executable_path.lower().endswith('.exe'):
+            return str("Only .exe files are allowed on Windows")
+            
+    elif platform.system() == "Darwin":  # macOS
+        allowed_dirs = [
+            "/Applications",
+            "/System/Applications",
+            "/usr/bin",
+            "/usr/local/bin",
+            os.path.expanduser("~/Applications")
+        ]
+        
+    else:  # Linux
+        allowed_dirs = [
+            "/usr/bin",
+            "/usr/local/bin",
+            "/bin",
+            "/snap/bin",
+            "/opt",
+            os.path.expanduser("~/.local/bin")
+        ]
     
     if not any(executable_path.startswith(allowed_dir) for allowed_dir in allowed_dirs):
         return str(f"Path not in allowed directories. Allowed: {', '.join(allowed_dirs)}")
@@ -253,48 +275,30 @@ def launch_by_path(executable_path: str, args: str = "") -> str:
         return str(f"Failed to launch: {str(e)}")
 
 @mcp.tool()
-def debug_office_launch() -> str:
-    """Debug Office launch issues by checking paths and trying different methods."""
-    office_path = r"C:\Program Files\Microsoft Office\root\Office16"
-    results = []
+def reload_apps_config(config_path: str = "apps_config.json") -> str:
+    """Reload the apps configuration from file.
     
-    # Check if the Office directory exists
-    if os.path.exists(office_path):
-        results.append(f"✓ Office directory exists: {office_path}")
-        
-        # Check for specific executables
-        office_apps = {
-            "WINWORD.EXE": "Word",
-            "EXCEL.EXE": "Excel", 
-            "POWERPNT.EXE": "PowerPoint",
-            "OUTLOOK.EXE": "Outlook"
-        }
-        
-        for exe_name, app_name in office_apps.items():
-            exe_path = os.path.join(office_path, exe_name)
-            if os.path.exists(exe_path):
-                results.append(f"✓ {app_name} found: {exe_path}")
-                
-                # Try different launch methods
-                try:
-                    # Method 1: os.startfile
-                    os.startfile(exe_path)
-                    results.append(f"  → Successfully launched {app_name} with os.startfile")
-                except Exception as e:
-                    results.append(f"  → os.startfile failed: {e}")
-                    
-                    try:
-                        # Method 2: subprocess with shell=False
-                        subprocess.Popen([exe_path])
-                        results.append(f"  → Successfully launched {app_name} with subprocess")
-                    except Exception as e2:
-                        results.append(f"  → subprocess failed: {e2}")
-            else:
-                results.append(f"✗ {app_name} NOT found: {exe_path}")
-    else:
-        results.append(f"✗ Office directory NOT found: {office_path}")
-        
-    return "\n".join(results)
+    Args:
+        config_path: Path to the configuration file (default: apps_config.json)
+    """
+    load_apps_config(config_path)
+    return f"Reloaded configuration. Loaded {len(APPS)} apps for {platform.system()}"
+
+@mcp.tool()
+def get_current_os() -> str:
+    """Get information about the current operating system."""
+    info = {
+        "system": platform.system(),
+        "release": platform.release(),
+        "version": platform.version(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
+        "apps_loaded": len(APPS)
+    }
+    return json.dumps(info, indent=2)
+
+# Remove Windows-specific debug function and import
+# (winreg import and debug_office_launch function are no longer needed)
 
 if __name__ == "__main__":
     # prints a one-line JSON schema, then listens for tool calls

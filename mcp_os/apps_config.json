@@ -1,0 +1,127 @@
+{
+  "windows": {
+    "notepad": ["notepad.exe"],
+    "calculator": ["calc.exe", "calculator.exe"],
+    "calc": ["calc.exe", "calculator.exe"],
+    "explorer": ["explorer.exe"],
+    "file explorer": ["explorer.exe"],
+    "cmd": ["cmd.exe"],
+    "command prompt": ["cmd.exe"],
+    "powershell": ["powershell.exe", "pwsh.exe"],
+    "paint": ["mspaint.exe"],
+    "wordpad": ["wordpad.exe"],
+    "task manager": ["taskmgr.exe"],
+    "taskmgr": ["taskmgr.exe"],
+    "control panel": ["control.exe"],
+    "regedit": ["regedit.exe"],
+    "registry editor": ["regedit.exe"],
+    "settings": ["ms-settings:"],
+    "windows settings": ["ms-settings:"],
+    "word": [
+      "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+      "winword.exe",
+      "start winword"
+    ],
+    "microsoft word": [
+      "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+      "winword.exe",
+      "start winword"
+    ],
+    "excel": [
+      "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "excel.exe",
+      "start excel"
+    ],
+    "microsoft excel": [
+      "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+      "excel.exe",
+      "start excel"
+    ],
+    "powerpoint": [
+      "C:\\Program Files\\Microsoft Office\\root\\Office16\\POWERPNT.EXE",
+      "powerpnt.exe",
+      "start powerpnt"
+    ],
+    "outlook": [
+      "C:\\Program Files\\Microsoft Office\\root\\Office16\\OUTLOOK.EXE",
+      "outlook.exe",
+      "start outlook"
+    ],
+    "chrome": [
+      "chrome.exe",
+      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+      "start chrome"
+    ],
+    "firefox": [
+      "firefox.exe",
+      "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+      "C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe"
+    ],
+    "edge": ["msedge.exe", "microsoftedge.exe", "start msedge"],
+    "code": [
+      "code.exe",
+      "C:\\Users\\{username}\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+      "C:\\Program Files\\Microsoft VS Code\\Code.exe"
+    ],
+    "vscode": [
+      "code.exe",
+      "C:\\Users\\{username}\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+      "C:\\Program Files\\Microsoft VS Code\\Code.exe"
+    ],
+    "visual studio code": [
+      "code.exe",
+      "C:\\Users\\{username}\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+      "C:\\Program Files\\Microsoft VS Code\\Code.exe"
+    ]
+  },
+  "darwin": {
+    "finder": ["open", "-a", "Finder"],
+    "safari": ["open", "-a", "Safari"],
+    "chrome": ["open", "-a", "Google Chrome"],
+    "firefox": ["open", "-a", "Firefox"],
+    "terminal": ["open", "-a", "Terminal"],
+    "calculator": ["open", "-a", "Calculator"],
+    "calendar": ["open", "-a", "Calendar"],
+    "mail": ["open", "-a", "Mail"],
+    "messages": ["open", "-a", "Messages"],
+    "notes": ["open", "-a", "Notes"],
+    "preview": ["open", "-a", "Preview"],
+    "system preferences": ["open", "-a", "System Preferences"],
+    "system settings": ["open", "-a", "System Settings"],
+    "activity monitor": ["open", "-a", "Activity Monitor"],
+    "word": ["/Applications/Microsoft Word.app/Contents/MacOS/Microsoft Word", "open", "-a", "Microsoft Word"],
+    "microsoft word": ["/Applications/Microsoft Word.app/Contents/MacOS/Microsoft Word", "open", "-a", "Microsoft Word"],
+    "excel": ["/Applications/Microsoft Excel.app/Contents/MacOS/Microsoft Excel", "open", "-a", "Microsoft Excel"],
+    "microsoft excel": ["/Applications/Microsoft Excel.app/Contents/MacOS/Microsoft Excel", "open", "-a", "Microsoft Excel"],
+    "powerpoint": ["/Applications/Microsoft PowerPoint.app/Contents/MacOS/Microsoft PowerPoint", "open", "-a", "Microsoft PowerPoint"],
+    "outlook": ["/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook", "open", "-a", "Microsoft Outlook"],
+    "code": ["/Applications/Visual Studio Code.app/Contents/MacOS/Electron", "open", "-a", "Visual Studio Code"],
+    "vscode": ["/Applications/Visual Studio Code.app/Contents/MacOS/Electron", "open", "-a", "Visual Studio Code"],
+    "visual studio code": ["/Applications/Visual Studio Code.app/Contents/MacOS/Electron", "open", "-a", "Visual Studio Code"],
+    "xcode": ["open", "-a", "Xcode"],
+    "slack": ["open", "-a", "Slack"],
+    "spotify": ["open", "-a", "Spotify"]
+  },
+  "linux": {
+    "terminal": ["gnome-terminal", "konsole", "xterm", "terminator"],
+    "firefox": ["firefox", "/usr/bin/firefox", "/snap/bin/firefox"],
+    "chrome": ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
+    "calculator": ["gnome-calculator", "kcalc", "xcalc", "calc"],
+    "text editor": ["gedit", "kate", "mousepad", "leafpad", "nano"],
+    "file manager": ["nautilus", "dolphin", "thunar", "pcmanfm", "nemo"],
+    "system monitor": ["gnome-system-monitor", "ksysguard", "htop", "top"],
+    "settings": ["gnome-control-center", "systemsettings", "unity-control-center"],
+    "libreoffice writer": ["libreoffice", "--writer", "lowriter"],
+    "libreoffice calc": ["libreoffice", "--calc", "localc"],
+    "libreoffice impress": ["libreoffice", "--impress", "loimpress"],
+    "code": ["code", "/usr/bin/code", "/snap/bin/code", "/usr/share/code/code"],
+    "vscode": ["code", "/usr/bin/code", "/snap/bin/code", "/usr/share/code/code"],
+    "visual studio code": ["code", "/usr/bin/code", "/snap/bin/code", "/usr/share/code/code"],
+    "thunderbird": ["thunderbird", "/usr/bin/thunderbird"],
+    "gimp": ["gimp", "/usr/bin/gimp"],
+    "vlc": ["vlc", "/usr/bin/vlc", "/snap/bin/vlc"],
+    "slack": ["slack", "/usr/bin/slack", "/snap/bin/slack"],
+    "discord": ["discord", "/usr/bin/discord", "/snap/bin/discord"]
+  }
+}

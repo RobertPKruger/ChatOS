@@ -1,0 +1,2 @@
+1. Add a local model to speed up chat.
+2. Add a SQL-database app to store server profiles and have the chatbot update records on command.

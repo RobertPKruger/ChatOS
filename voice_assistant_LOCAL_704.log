@@ -1,0 +1,66 @@
+2025-06-24 10:38:26,332 - __main__ - INFO - Available audio devices:
+2025-06-24 10:38:26,332 - __main__ - INFO -   0: Microsoft Sound Mapper - Input - In:2 Out:0
+2025-06-24 10:38:26,332 - __main__ - INFO -   1: Microphone Array (Realtek(R) Au - In:4 Out:0
+2025-06-24 10:38:26,333 - __main__ - INFO -   2: Microsoft Sound Mapper - Output - In:0 Out:2
+2025-06-24 10:38:26,333 - __main__ - INFO -   3: Speakers (Realtek(R) Audio) - In:0 Out:2
+2025-06-24 10:38:26,333 - __main__ - INFO -   4: Primary Sound Capture Driver - In:2 Out:0
+2025-06-24 10:38:26,333 - __main__ - INFO -   5: Microphone Array (Realtek(R) Audio) - In:4 Out:0
+2025-06-24 10:38:26,334 - __main__ - INFO -   6: Primary Sound Driver - In:0 Out:2
+2025-06-24 10:38:26,334 - __main__ - INFO -   7: Speakers (Realtek(R) Audio) - In:0 Out:2
+2025-06-24 10:38:26,334 - __main__ - INFO -   8: Speakers (Realtek(R) Audio) - In:0 Out:2
+2025-06-24 10:38:26,334 - __main__ - INFO -   9: Microphone Array (Realtek(R) Audio) - In:4 Out:0
+2025-06-24 10:38:26,334 - __main__ - INFO -   10: Headphones 1 (Realtek HD Audio 2nd output with SST) - In:0 Out:2
+2025-06-24 10:38:26,334 - __main__ - INFO -   11: Headphones 2 (Realtek HD Audio 2nd output with SST) - In:0 Out:2
+2025-06-24 10:38:26,334 - __main__ - INFO -   12: PC Speaker (Realtek HD Audio 2nd output with SST) - In:2 Out:0
+2025-06-24 10:38:26,334 - __main__ - INFO -   13: Speakers 1 (Realtek HD Audio output with SST) - In:0 Out:2
+2025-06-24 10:38:26,334 - __main__ - INFO -   14: Speakers 2 (Realtek HD Audio output with SST) - In:0 Out:2
+2025-06-24 10:38:26,335 - __main__ - INFO -   15: PC Speaker (Realtek HD Audio output with SST) - In:2 Out:0
+2025-06-24 10:38:26,335 - __main__ - INFO -   16: Microphone (Realtek HD Audio Mic input) - In:2 Out:0
+2025-06-24 10:38:26,335 - __main__ - INFO -   17: Microphone Array (Realtek HD Audio Mic Array input) - In:4 Out:0
+2025-06-24 10:38:26,335 - __main__ - INFO -   18: Headphones () - In:0 Out:2
+2025-06-24 10:38:26,335 - __main__ - INFO - Voice Assistant starting up...
+2025-06-24 10:38:26,335 - __main__ - INFO - Configuration: STT=gpt-4o-transcribe, Chat=gpt-4o, TTS=tts-1
+2025-06-24 10:38:26,335 - __main__ - INFO - Mode: Always listening (continuous)
+2025-06-24 10:38:26,336 - __main__ - INFO - Starting voice assistant (restart #0)
+2025-06-24 10:38:26,336 - __main__ - INFO - Starting conversation loop with continuous listening
+2025-06-24 10:38:26,336 - __main__ - INFO - Conversation history reset
+2025-06-24 10:38:27,335 - __main__ - INFO - Started continuous audio recording
+2025-06-24 10:38:27,335 - __main__ - INFO - Starting MCP server: C:\Users\comma\Projects\ChatOS\mcp_os\server.py
+2025-06-24 10:38:28,925 - __main__ - INFO - MCP client connected successfully
+2025-06-24 10:38:28,928 - __main__ - INFO - Loaded 19 tools
+2025-06-24 10:38:28,929 - __main__ - INFO - Speaking: Hello! I'm listening. You can speak naturally, and...
+2025-06-24 10:38:35,582 - __main__ - INFO - Audio playback completed
+2025-06-24 10:38:35,582 - __main__ - INFO - Listening for speech...
+2025-06-24 10:38:35,586 - __main__ - INFO - Speech detected (energy: 22.1195, threshold: 0.5000)
+2025-06-24 10:38:35,587 - __main__ - INFO - Ignoring short noise burst (10 frames)
+2025-06-24 10:38:44,064 - __main__ - INFO - Speech detected (energy: 150.0014, threshold: 0.5000)
+2025-06-24 10:38:51,802 - __main__ - INFO - Silence detected after 164 speech frames (peak energy: 684.8867)
+2025-06-24 10:38:53,774 - __main__ - INFO - Valid transcription: Can you find the location of less.exe on my computer?...
+2025-06-24 10:38:53,774 - __main__ - INFO - User said: Can you find the location of less.exe on my computer?
+2025-06-24 10:38:56,633 - __main__ - INFO - Speaking: I can't directly search for specific executable fi...
+2025-06-24 10:39:25,549 - __main__ - INFO - Audio playback completed
+2025-06-24 10:39:25,550 - __main__ - INFO - Listening for speech...
+2025-06-24 10:39:25,557 - __main__ - INFO - Speech detected (energy: 14.1907, threshold: 0.5000)
+2025-06-24 10:39:25,558 - __main__ - INFO - Ignoring short noise burst (3 frames)
+2025-06-24 10:39:25,559 - __main__ - INFO - Speech detected (energy: 29.6909, threshold: 0.5000)
+2025-06-24 10:39:25,560 - __main__ - INFO - Ignoring short noise burst (3 frames)
+2025-06-24 10:39:25,560 - __main__ - INFO - Speech detected (energy: 17.7705, threshold: 0.5000)
+2025-06-24 10:39:25,562 - __main__ - INFO - Silence detected after 26 speech frames (peak energy: 39.2916)
+2025-06-24 10:39:27,431 - __main__ - INFO - Valid transcription: Hello, how are you?...
+2025-06-24 10:39:27,432 - __main__ - INFO - User said: Hello, how are you?
+2025-06-24 10:39:28,791 - __main__ - INFO - Speaking: Hey there! I'm here and ready to help. How about y...
+2025-06-24 10:39:34,124 - __main__ - INFO - Audio playback completed
+2025-06-24 10:39:34,124 - __main__ - INFO - Listening for speech...
+2025-06-24 10:39:34,128 - __main__ - INFO - Speech detected (energy: 15.7231, threshold: 0.5000)
+2025-06-24 10:39:34,129 - __main__ - INFO - Ignoring short noise burst (7 frames)
+2025-06-24 10:39:37,448 - __main__ - INFO - Speech detected (energy: 157.9355, threshold: 0.5000)
+2025-06-24 10:39:43,478 - __main__ - INFO - Silence detected after 151 speech frames (peak energy: 648.8425)
+2025-06-24 10:39:45,667 - __main__ - INFO - Valid transcription: Where is Git usually installed on Windows?...
+2025-06-24 10:39:45,667 - __main__ - INFO - User said: Where is Git usually installed on Windows?
+2025-06-24 10:39:47,422 - __main__ - INFO - Speaking: On Windows, Git is usually installed in `C:\Progra...
+2025-06-24 10:40:14,024 - __main__ - INFO - Audio playback completed
+2025-06-24 10:40:14,024 - __main__ - INFO - Listening for speech...
+2025-06-24 10:40:14,024 - __main__ - INFO - Speech detected (energy: 128.3964, threshold: 0.0200)
+2025-06-24 10:40:14,025 - __main__ - INFO - Ignoring short noise burst (4 frames)
+2025-06-24 10:40:14,035 - __main__ - INFO - Speech detected (energy: 16.4961, threshold: 0.5000)
+2025-06-24 10:40:14,037 - __main__ - INFO - Ignoring short noise burst (7 frames)
