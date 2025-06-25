@@ -37,7 +37,12 @@ try:
     import webrtcvad
     VAD_AVAILABLE = True
 except ImportError:
-    logger.warning("webrtcvad not available, falling back to energy-based detection")
+    import logging
+    logging.basicConfig(level=logging.INFO)
+    logging.getLogger("urllib3").setLevel(logging.WARNING)
+    logging.getLogger("openai").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.warning("webrtcvad not available, falling back to energy-based detection")
     VAD_AVAILABLE = False
 
 # Load environment variables
