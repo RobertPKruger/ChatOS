@@ -1,13 +1,11 @@
-
-# enhanced_chat_host_v2.py
+# enhanced_chat_host_v3.py
 """
-Enhanced MCP Chat Host - Always-on voice assistant with interruption support
+Enhanced MCP Chat Host - Version 3 with improved voice responsiveness
 New features:
-- Continuous listening (no push-to-talk)
-- Voice Activity Detection (VAD) support
-- Interrupt assistant while speaking
-- Proper shutdown of both server and client
-- Improved audio handling
+- Smart listening state management
+- Processing timeout with wake phrase interruption
+- Better state transitions to prevent false triggers
+- "Hello Abraxas, are you stuck?" wake phrase during processing
 """
 
 import asyncio
@@ -26,6 +24,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
+from enum import Enum
 import numpy as np
 
 import sounddevice as sd
@@ -44,6 +43,15 @@ except ImportError:
 # Load environment variables
 load_dotenv()
 
+# Assistant States
+class AssistantMode(Enum):
+    LISTENING = "listening"          # Actively listening for commands
+    RECORDING = "recording"          # Recording user speech
+    PROCESSING = "processing"        # Processing with LLM
+    SPEAKING = "speaking"            # Playing TTS response
+    STUCK_CHECK = "stuck_check"      # Listening only for wake phrase
+    ERROR = "error"                  # Error state
+
 # Configuration
 @dataclass
 class Config:
@@ -56,19 +64,22 @@ class Config:
     sample_rate: int = 16000
     min_audio_size: int = 10000
     tool_timeout: float = 30.0
+    processing_timeout: float = 60.0  # Maximum time for full processing cycle
+    stuck_phrase: str = "hello abraxas are you stuck"  # Wake phrase (normalized)
+    stuck_check_interval: float = 5.0  # How often to check for stuck state
     reconnect_delay: float = 2.0
     max_retries: int = 3
     log_level: str = "INFO"
     log_file: str = "voice_assistant.log"
     enable_vad: bool = True
-    vad_aggressiveness: int = 3  # 0-3, higher = more aggressive (increased from 2)
-    silence_threshold: float = 0.03  # Energy threshold for silence detection (increased)
-    silence_duration: float = 1.5  # Seconds of silence before processing
-    min_speech_duration: float = 0.8  # Minimum speech duration in seconds (increased)
-    energy_threshold_multiplier: float = 2.0  # Dynamic threshold multiplier (increased)
-    min_confidence_length: int = 2  # Minimum words for valid transcription
-    max_energy_threshold: float = 0.5  # Maximum energy threshold to prevent oversensitivity
-    english_confidence_threshold: float = 0.7  # Confidence threshold for language detection
+    vad_aggressiveness: int = 3
+    silence_threshold: float = 0.03
+    silence_duration: float = 1.5
+    min_speech_duration: float = 0.8
+    energy_threshold_multiplier: float = 2.0
+    min_confidence_length: int = 2
+    max_energy_threshold: float = 0.5
+    english_confidence_threshold: float = 0.7
     
     @classmethod
     def from_env(cls) -> "Config":
@@ -82,6 +93,9 @@ class Config:
             sample_rate=int(os.getenv("SAMPLE_RATE", "16000")),
             min_audio_size=int(os.getenv("MIN_AUDIO_SIZE", "10000")),
             tool_timeout=float(os.getenv("TOOL_TIMEOUT", "30.0")),
+            processing_timeout=float(os.getenv("PROCESSING_TIMEOUT", "60.0")),
+            stuck_phrase=os.getenv("STUCK_PHRASE", "hello abraxas are you stuck").lower().replace(",", "").replace("?", ""),
+            stuck_check_interval=float(os.getenv("STUCK_CHECK_INTERVAL", "5.0")),
             reconnect_delay=float(os.getenv("RECONNECT_DELAY", "2.0")),
             max_retries=int(os.getenv("MAX_RETRIES", "3")),
             log_level=os.getenv("LOG_LEVEL", "INFO"),
@@ -106,18 +120,29 @@ try:
     PYGAME_AVAILABLE = True
 except:
     PYGAME_AVAILABLE = False
-    logger.warning("pygame not available for audio fallback")
 
 # Setup logging
 def setup_logging():
     """Configure logging with rotation and proper formatting"""
+    # Create handlers with UTF-8 encoding
+    file_handler = logging.FileHandler(config.log_file, encoding='utf-8')
+    
+    # For console output on Windows, use UTF-8 encoding
+    console_handler = logging.StreamHandler(sys.stdout)
+    if sys.platform == "win32":
+        # Set console to UTF-8 mode on Windows
+        import locale
+        import codecs
+        if sys.stdout.encoding != 'utf-8':
+            sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+        if sys.stderr.encoding != 'utf-8':
+            sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+    
+    # Configure logging
     logging.basicConfig(
         level=getattr(logging, config.log_level.upper()),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(config.log_file),
-            logging.StreamHandler(sys.stdout)
-        ]
+        handlers=[file_handler, console_handler]
     )
     
     # Reduce noise from third-party libraries
@@ -133,8 +158,9 @@ class AssistantState:
     """Global state management for the assistant"""
     def __init__(self):
         self.running = True
-        self.muted = False
-        self.is_speaking = False
+        self.mode = AssistantMode.LISTENING
+        self.mode_lock = threading.Lock()
+        self.processing_start_time: Optional[float] = None
         self.interrupt_flag = threading.Event()
         self.openai_client: Optional[OpenAI] = None
         self.mcp_client: Optional[Client] = None
@@ -144,6 +170,31 @@ class AssistantState:
         self.conversation_history: List[Dict[str, Any]] = []
         self.audio_queue: asyncio.Queue = asyncio.Queue()
         self.vad = webrtcvad.Vad(config.vad_aggressiveness) if (config.enable_vad and VAD_AVAILABLE) else None
+        
+    def set_mode(self, new_mode: AssistantMode):
+        """Thread-safe mode setter with logging"""
+        with self.mode_lock:
+            old_mode = self.mode
+            self.mode = new_mode
+            # Use ASCII-safe arrow for better compatibility
+            logger.info(f"Mode transition: {old_mode.value} -> {new_mode.value}")
+            
+            # Start processing timer
+            if new_mode == AssistantMode.PROCESSING:
+                self.processing_start_time = time.time()
+            elif old_mode == AssistantMode.PROCESSING:
+                self.processing_start_time = None
+    
+    def get_mode(self) -> AssistantMode:
+        """Thread-safe mode getter"""
+        with self.mode_lock:
+            return self.mode
+    
+    def is_stuck(self) -> bool:
+        """Check if we've been processing too long"""
+        if self.processing_start_time and self.get_mode() == AssistantMode.PROCESSING:
+            return (time.time() - self.processing_start_time) > config.processing_timeout
+        return False
         
     def reset_conversation(self):
         """Reset the conversation history"""
@@ -190,11 +241,11 @@ When the user asks to shut down, exit, or quit, acknowledge and prepare to shut 
 """
 
 ################################################################################
-# Audio recording with continuous listening
+# Audio recording with mode-aware listening
 ################################################################################
 
 class ContinuousAudioRecorder:
-    """Manages continuous audio recording with VAD and interruption support"""
+    """Manages continuous audio recording with mode awareness"""
     
     def __init__(self, sample_rate: int = 16000):
         self.sample_rate = sample_rate
@@ -250,9 +301,15 @@ class ContinuousAudioRecorder:
         """Calculate RMS energy of audio data"""
         return np.sqrt(np.mean(audio_data.astype(float)**2))
     
-    async def record_until_silence(self) -> Optional[io.BytesIO]:
-        """Record audio until silence is detected"""
-        logger.info("Listening for speech...")
+    async def record_until_silence(self, check_stuck_phrase: bool = False) -> Optional[io.BytesIO]:
+        """Record audio until silence is detected, optionally checking for stuck phrase"""
+        current_mode = state.get_mode()
+        
+        # Don't record in certain modes unless checking for stuck phrase
+        if not check_stuck_phrase and current_mode not in [AssistantMode.LISTENING, AssistantMode.STUCK_CHECK]:
+            return None
+            
+        logger.info(f"Listening for {'stuck phrase' if check_stuck_phrase else 'speech'} in mode: {current_mode.value}")
         
         frames = []
         silence_frames = 0
@@ -260,6 +317,11 @@ class ContinuousAudioRecorder:
         speech_started = False
         required_silence_frames = int(config.silence_duration * self.sample_rate / (self.sample_rate * 0.03))
         min_speech_frames = int(config.min_speech_duration * self.sample_rate / (self.sample_rate * 0.03))
+        
+        # Shorter requirements for stuck phrase detection
+        if check_stuck_phrase:
+            required_silence_frames = int(0.5 * self.sample_rate / (self.sample_rate * 0.03))
+            min_speech_frames = int(0.3 * self.sample_rate / (self.sample_rate * 0.03))
         
         # Dynamic noise floor estimation
         noise_samples = []
@@ -270,6 +332,13 @@ class ContinuousAudioRecorder:
         
         while self.recording and not state.interrupt_flag.is_set():
             try:
+                # Check if mode changed (unless we're checking for stuck phrase)
+                if not check_stuck_phrase:
+                    current_mode = state.get_mode()
+                    if current_mode not in [AssistantMode.LISTENING, AssistantMode.STUCK_CHECK]:
+                        logger.debug(f"Mode changed to {current_mode.value}, stopping recording")
+                        return None
+                
                 # Get audio chunk
                 audio_chunk = self.audio_queue.get(timeout=0.1)
                 
@@ -290,12 +359,6 @@ class ContinuousAudioRecorder:
                         noise_floor = max(noise_floor, config.silence_threshold)
                         noise_floor = min(noise_floor, config.max_energy_threshold)
                 
-                # Check if someone is speaking (to interrupt assistant)
-                if state.is_speaking and energy > noise_floor * 1.5:
-                    logger.info("User interruption detected")
-                    state.interrupt_flag.set()
-                    return None
-                
                 # Use VAD if enabled and available
                 if config.enable_vad and state.vad and VAD_AVAILABLE:
                     # VAD requires specific frame size
@@ -315,7 +378,7 @@ class ContinuousAudioRecorder:
                     if not speech_started:
                         # Require sustained energy above threshold
                         if energy > noise_floor * 1.5:  # Higher threshold for speech start
-                            logger.info(f"Speech detected (energy: {energy:.4f}, threshold: {noise_floor:.4f})")
+                            logger.debug(f"Speech detected (energy: {energy:.4f}, threshold: {noise_floor:.4f})")
                             speech_started = True
                             frames.append(audio_chunk)
                             speech_frames += 1
@@ -332,17 +395,17 @@ class ContinuousAudioRecorder:
                         if speech_frames >= min_speech_frames:
                             # Also check if peak energy was significant
                             if peak_energy > noise_floor * 2:
-                                logger.info(f"Silence detected after {speech_frames} speech frames (peak energy: {peak_energy:.4f})")
+                                logger.debug(f"Silence detected after {speech_frames} speech frames (peak energy: {peak_energy:.4f})")
                                 break
                             else:
-                                logger.info(f"Ignoring low-energy speech (peak: {peak_energy:.4f})")
+                                logger.debug(f"Ignoring low-energy speech (peak: {peak_energy:.4f})")
                                 frames = []
                                 speech_frames = 0
                                 speech_started = False
                                 silence_frames = 0
                                 peak_energy = 0
                         else:
-                            logger.info(f"Ignoring short noise burst ({speech_frames} frames)")
+                            logger.debug(f"Ignoring short noise burst ({speech_frames} frames)")
                             frames = []
                             speech_frames = 0
                             speech_started = False
@@ -361,7 +424,7 @@ class ContinuousAudioRecorder:
         
         # Final peak energy check
         if peak_energy < noise_floor * 1.5:
-            logger.info(f"Rejecting low-energy audio (peak: {peak_energy:.4f})")
+            logger.debug(f"Rejecting low-energy audio (peak: {peak_energy:.4f})")
             return None
         
         # Convert frames to WAV
@@ -387,6 +450,51 @@ class ContinuousAudioRecorder:
 
 # Global audio recorder
 audio_recorder = ContinuousAudioRecorder(config.sample_rate)
+
+################################################################################
+# Stuck detection task
+################################################################################
+
+async def stuck_detection_task():
+    """Background task to check if assistant is stuck and listen for wake phrase"""
+    while state.running:
+        try:
+            # Check every few seconds
+            await asyncio.sleep(config.stuck_check_interval)
+            
+            # Only check if we're in processing mode and stuck
+            if state.is_stuck():
+                logger.warning(f"Assistant appears stuck (processing for {time.time() - state.processing_start_time:.1f}s)")
+                state.set_mode(AssistantMode.STUCK_CHECK)
+                
+                # Try to detect the wake phrase
+                audio_buffer = await audio_recorder.record_until_silence(check_stuck_phrase=True)
+                
+                if audio_buffer:
+                    # Quick transcription check for wake phrase
+                    try:
+                        response = state.openai_client.audio.transcriptions.create(
+                            model=config.stt_model,
+                            file=audio_buffer,
+                            language="en"
+                        )
+                        text = response.text.strip().lower().replace(",", "").replace("?", "")
+                        
+                        logger.info(f"Stuck check transcription: {text}")
+                        
+                        # Check if it matches our wake phrase (fuzzy match)
+                        if any(word in config.stuck_phrase.split() for word in text.split()):
+                            logger.info("Wake phrase detected! Resetting to listening mode")
+                            state.interrupt_flag.set()
+                            state.set_mode(AssistantMode.LISTENING)
+                            # Speak acknowledgment
+                            asyncio.create_task(speak_text("I'm back! Sorry about that. How can I help you?"))
+                    except Exception as e:
+                        logger.error(f"Error in stuck phrase detection: {e}")
+                
+        except Exception as e:
+            logger.error(f"Error in stuck detection task: {e}")
+            await asyncio.sleep(1)
 
 ################################################################################
 # MCP Client management with subprocess control
@@ -546,10 +654,10 @@ async def call_tool_with_timeout(mcp_client: Client, call) -> str:
         return error_msg
 
 ################################################################################
-# STT with retry logic
+# STT with retry logic and stuck phrase detection
 ################################################################################
 
-async def transcribe_audio(audio_buffer: io.BytesIO) -> Optional[str]:
+async def transcribe_audio(audio_buffer: io.BytesIO, check_stuck_phrase: bool = False) -> Optional[str]:
     """Transcribe audio with retry logic and validation"""
     async def do_transcribe():
         try:
@@ -566,6 +674,10 @@ async def transcribe_audio(audio_buffer: io.BytesIO) -> Optional[str]:
     
     try:
         text = await retry_with_backoff(do_transcribe())
+        
+        # If checking for stuck phrase, do minimal validation
+        if check_stuck_phrase:
+            return text
         
         # Validate transcription
         if not text or len(text.strip()) == 0:
@@ -633,7 +745,7 @@ async def transcribe_audio(audio_buffer: io.BytesIO) -> Optional[str]:
                                "to", "for", "of", "with", "as", "by", "that", "this",
                                "what", "how", "when", "where", "why", "who", "which",
                                "can", "will", "would", "should", "could", "have", "has", 
-                               "launch", "open", "start", "play", "run", "create", "delete", "edit", "save"   }
+                               "launch", "open", "start", "play", "run", "create", "delete", "edit", "save"}
         
         words_lower = [w.lower() for w in words]
         english_word_count = sum(1 for w in words_lower if w in common_english_words)
@@ -659,9 +771,9 @@ async def speak_text(text: str) -> bool:
     if not text or text.isspace():
         text = "Okay."
     
-    # Clear any previous interrupt flag
+    # Set speaking mode
+    state.set_mode(AssistantMode.SPEAKING)
     state.interrupt_flag.clear()
-    state.is_speaking = True
     
     try:
         logger.info(f"Speaking: {text[:50]}...")
@@ -681,6 +793,7 @@ async def speak_text(text: str) -> bool:
         # Check for interruption before playing
         if state.interrupt_flag.is_set():
             logger.info("Speech interrupted before playback")
+            state.set_mode(AssistantMode.LISTENING)
             return False
         
         # Try different audio playback methods
@@ -774,16 +887,19 @@ async def speak_text(text: str) -> bool:
         
         if not success:
             logger.error("All audio playback methods failed")
+            state.set_mode(AssistantMode.LISTENING)
             return False
             
         logger.info("Audio playback completed")
+        
+        # Return to listening mode
+        state.set_mode(AssistantMode.LISTENING)
         return True
         
     except Exception as e:
         logger.error(f"TTS error: {e}")
+        state.set_mode(AssistantMode.LISTENING)
         return False
-    finally:
-        state.is_speaking = False
 
 ################################################################################
 # Error handling and retry utilities
@@ -846,12 +962,12 @@ async def shutdown_system():
     logger.info("System shutdown complete")
 
 ################################################################################
-# Main conversation loop
+# Main conversation loop with improved state management
 ################################################################################
 
 async def conversation_loop():
-    """Main conversation loop with continuous listening"""
-    logger.info("Starting conversation loop with continuous listening")
+    """Main conversation loop with improved state management"""
+    logger.info("Starting conversation loop with mode-aware listening")
     
     # Initialize conversation
     state.reset_conversation()
@@ -867,6 +983,9 @@ async def conversation_loop():
     # Start continuous audio recording
     audio_recorder.start()
     
+    # Start stuck detection task
+    stuck_task = asyncio.create_task(stuck_detection_task())
+    
     async with get_mcp_client() as mcp_client:
         state.mcp_client = mcp_client
         
@@ -878,8 +997,9 @@ async def conversation_loop():
         
         while state.running:
             try:
-                if state.muted:
-                    await asyncio.sleep(1)
+                # Only record in listening mode
+                if state.get_mode() != AssistantMode.LISTENING:
+                    await asyncio.sleep(0.1)
                     continue
                 
                 # Record audio until silence
@@ -888,12 +1008,19 @@ async def conversation_loop():
                 if not audio_buffer:
                     continue
                 
+                # Switch to recording mode
+                state.set_mode(AssistantMode.RECORDING)
+                
                 # Transcribe
                 user_text = await transcribe_audio(audio_buffer)
                 if not user_text:
+                    state.set_mode(AssistantMode.LISTENING)
                     continue
                 
                 logger.info(f"User said: {user_text}")
+                
+                # Switch to processing mode
+                state.set_mode(AssistantMode.PROCESSING)
                 
                 # Handle special commands
                 lower_text = user_text.lower().strip()
@@ -901,16 +1028,6 @@ async def conversation_loop():
                 if lower_text in {"reset chat", "new chat", "clear history"}:
                     state.reset_conversation()
                     await speak_text("Starting a new conversation.")
-                    continue
-                
-                if lower_text in {"mute", "quiet", "stop listening"}:
-                    state.muted = True
-                    await speak_text("I'm muted. Say 'unmute' to resume.")
-                    continue
-                
-                if lower_text in {"unmute", "resume", "wake up"}:
-                    state.muted = False
-                    await speak_text("I'm listening again.")
                     continue
                 
                 if any(phrase in lower_text for phrase in ["exit", "quit", "goodbye", "shut down", "shutdown"]):
@@ -945,6 +1062,12 @@ async def conversation_loop():
                         
                         # Execute each tool call
                         for tool_call in message.tool_calls:
+                            # Check if we should interrupt
+                            if state.interrupt_flag.is_set() or state.get_mode() == AssistantMode.STUCK_CHECK:
+                                logger.info("Processing interrupted")
+                                state.set_mode(AssistantMode.LISTENING)
+                                break
+                                
                             tool_result = await call_tool_with_timeout(mcp_client, tool_call)
                             
                             # Add tool result to history
@@ -954,21 +1077,22 @@ async def conversation_loop():
                                 "content": tool_result
                             })
                         
-                        # Get the model's follow-up response
-                        follow_up = state.openai_client.chat.completions.create(
-                            model=config.chat_model,
-                            messages=state.conversation_history,
-                            tools=tools,
-                            tool_choice="auto"
-                        )
-                        
-                        follow_up_message = follow_up.choices[0].message
-                        assistant_response = follow_up_message.content or "Task completed."
-                        
-                        state.conversation_history.append({
-                            "role": "assistant", 
-                            "content": assistant_response
-                        })
+                        # Get the model's follow-up response if not interrupted
+                        if not state.interrupt_flag.is_set() and state.get_mode() != AssistantMode.STUCK_CHECK:
+                            follow_up = state.openai_client.chat.completions.create(
+                                model=config.chat_model,
+                                messages=state.conversation_history,
+                                tools=tools,
+                                tool_choice="auto"
+                            )
+                            
+                            follow_up_message = follow_up.choices[0].message
+                            assistant_response = follow_up_message.content or "Task completed."
+                            
+                            state.conversation_history.append({
+                                "role": "assistant", 
+                                "content": assistant_response
+                            })
                     else:
                         # Regular text response
                         assistant_response = message.content or "I'm not sure how to respond to that."
@@ -977,8 +1101,12 @@ async def conversation_loop():
                             "content": assistant_response
                         })
                     
-                    # Speak the response (with interruption support)
-                    await speak_text(assistant_response)
+                    # Speak the response if not interrupted
+                    if not state.interrupt_flag.is_set() and state.get_mode() != AssistantMode.STUCK_CHECK:
+                        await speak_text(assistant_response)
+                    else:
+                        logger.info("Skipping speech due to interruption")
+                        state.set_mode(AssistantMode.LISTENING)
                     
                 except Exception as e:
                     logger.error(f"Error in chat completion: {e}")
@@ -987,8 +1115,17 @@ async def conversation_loop():
                     
             except Exception as e:
                 logger.error(f"Error in conversation loop: {e}")
+                state.set_mode(AssistantMode.ERROR)
                 await asyncio.sleep(config.reconnect_delay)
+                state.set_mode(AssistantMode.LISTENING)
                 continue
+    
+    # Cancel stuck detection task
+    stuck_task.cancel()
+    try:
+        await stuck_task
+    except asyncio.CancelledError:
+        pass
 
 ################################################################################
 # Main application with restart capability
@@ -1034,7 +1171,8 @@ def main():
     
     logger.info("Voice Assistant starting up...")
     logger.info(f"Configuration: STT={config.stt_model}, Chat={config.chat_model}, TTS={config.tts_model}")
-    logger.info("Mode: Always listening (continuous)")
+    logger.info(f"Mode: Smart listening with processing timeout ({config.processing_timeout}s)")
+    logger.info(f"Wake phrase when stuck: '{config.stuck_phrase}'")
     
     try:
         asyncio.run(run_forever())
