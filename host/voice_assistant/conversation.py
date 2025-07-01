@@ -123,14 +123,13 @@ class ConversationManager:
         self.state.conversation_history.append({"role": "user", "content": user_text})
         
         try:
-            completion = self.state.openai_client.chat.completions.create(
-                model=self.config.chat_model,
+            completion = self.state.chat_provider.complete(
                 messages=self.state.conversation_history,
                 tools=tools,
                 tool_choice="auto"
             )
-            
-            choice = completion.choices[0]
+
+            choice  = completion.choices[0]
             message = choice.message
             
             assistant_response = ""
@@ -164,8 +163,7 @@ class ConversationManager:
                 
                 # Get the model's follow-up response if not interrupted
                 if not self.state.interrupt_flag.is_set() and self.state.get_mode() != AssistantMode.STUCK_CHECK:
-                    follow_up = self.state.openai_client.chat.completions.create(
-                        model=self.config.chat_model,
+                    follow_up = self.state.chat_provider.complete(
                         messages=self.state.conversation_history,
                         tools=tools,
                         tool_choice="auto"
@@ -259,6 +257,9 @@ class ConversationManager:
                     
                     # Process user input
                     assistant_response = await self.process_user_input(user_text, mcp_client, tools)
+
+                    provider_used = getattr(self.state.chat_provider, "last_provider", "unknown")
+                    logger.info(f"Turn answered by: {provider_used}")
                     
                     # Speak the response if not interrupted
                     if assistant_response and not self.state.interrupt_flag.is_set() and \

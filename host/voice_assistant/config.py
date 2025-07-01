@@ -25,6 +25,8 @@ class Config:
     tts_fallback: Optional[str] = None
     
     # OpenAI configuration
+
+
     openai_api_key: str = ""
     stt_model: str = "gpt-4o-transcribe"
     chat_model: str = "gpt-4o"
@@ -78,6 +80,11 @@ class Config:
     recording_timeout: float = 10.0
     chunk_duration: float = 0.1
     wake_phrase_timeout: float = 5.0
+
+    local_chat_model: str      = "mistral-small:22b-instruct-2409-q4_0"
+    frontier_chat_model: str   = "gpt-4o"
+    local_chat_timeout: float  = 30.0
+    ollama_host: str           = "http://localhost:11434"
     
     @classmethod
     def from_env(cls) -> "Config":
@@ -104,6 +111,12 @@ class Config:
             ollama_model=os.getenv("OLLAMA_MODEL", "mistral"),
             pyttsx3_voice_id=os.getenv("PYTTSX3_VOICE_ID"),
             pyttsx3_rate=int(os.getenv("PYTTSX3_RATE", "150")),
+
+            # Ollama configuration -- todo: fix these 
+            local_chat_model   = os.getenv("LOCAL_CHAT_MODEL", "mistral-small:22b-instruct-2409-q4_0"),
+            frontier_chat_model = os.getenv("FRONTIER_CHAT_MODEL", "o3"),
+            local_chat_timeout = int(os.getenv("LOCAL_CHAT_TIMEOUT", "30")),
+            ollama_host        = os.getenv("OLLAMA_HOST", "http://localhost:11434"),
             
             # Hybrid configuration
             use_primary_for_tools=os.getenv("USE_PRIMARY_FOR_TOOLS", "true").lower() == "true",

@@ -74,7 +74,7 @@ class Config:
     tts_voice: str = "nova"
     
     # Local Model Configuration
-    local_model: str = "phi3:mini"
+    local_model: str = "mistral-small:22b-instruct-2409-q4_0"
     use_local_first: bool = True
     local_timeout: float = 10.0
     local_max_tokens: int = 512
@@ -124,7 +124,7 @@ class Config:
             chat_model=os.getenv("CHAT_MODEL", "gpt-4o"),
             tts_model=os.getenv("TTS_MODEL", "tts-1"),
             tts_voice=os.getenv("TTS_VOICE", "nova"),
-            local_model=os.getenv("LOCAL_MODEL", "phi3:mini"),
+            local_model=os.getenv("LOCAL_MODEL", "mistral-small:22b-instruct-2409-q4_0"),
             use_local_first=os.getenv("USE_LOCAL_FIRST", "true").lower() == "true",
             local_timeout=float(os.getenv("LOCAL_TIMEOUT", "10.0")),
             local_max_tokens=int(os.getenv("LOCAL_MAX_TOKENS", "512")),
