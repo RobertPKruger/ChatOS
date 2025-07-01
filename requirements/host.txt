@@ -32,6 +32,7 @@ python-dotenv==1.1.0
 python-multipart==0.0.20
 pywin32==310
 rich==14.0.0
+scipy>=1.10.0  # Used for signal processing in audio handling
 setuptools==80.9.0
 shellingham==1.5.4
 six==1.17.0
@@ -46,3 +47,8 @@ typing-inspection==0.4.1
 typing_extensions==4.14.0
 uvicorn==0.34.3
 webrtcvad==2.0.10
+
+# Optional: For local model support (when you're ready to use them)
+# aiohttp>=3.8.0  # For Ollama integration
+# openai-whisper>=20231117  # For local Whisper transcription  
+# pyttsx3>=2.90  # For local text-to-speech

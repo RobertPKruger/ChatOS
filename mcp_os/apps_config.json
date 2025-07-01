@@ -12,6 +12,7 @@
       "outlook": ["outlook", "email", "mail", "microsoft outlook"],
       "code": ["code", "vscode", "visual studio code", "vs code", "editor"]
     },
+    
     "darwin": {
       "terminal": ["terminal", "term", "console", "command line", "shell"],
       "safari": ["safari", "browser", "web browser", "internet"],

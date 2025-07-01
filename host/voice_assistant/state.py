@@ -17,8 +17,8 @@ try:
 except ImportError:
     VAD_AVAILABLE = False
 
-from openai import OpenAI
 from fastmcp import Client
+from .model_providers.base import TranscriptionProvider, ChatCompletionProvider, TextToSpeechProvider
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,16 @@ class AssistantState:
         self.mode_lock = threading.Lock()
         self.processing_start_time: Optional[float] = None
         self.interrupt_flag = threading.Event()
-        self.openai_client: Optional[OpenAI] = None
+        
+        # Model providers - will be injected
+        self.transcription_provider: Optional[TranscriptionProvider] = None
+        self.chat_provider: Optional[ChatCompletionProvider] = None
+        self.tts_provider: Optional[TextToSpeechProvider] = None
+        
+        # OpenAI client for backward compatibility
+        self.openai_client = None
+        
+        # MCP client
         self.mcp_client: Optional[Client] = None
         self.mcp_process: Optional[subprocess.Popen] = None
         self.tools_cache: List[Dict[str, Any]] = []

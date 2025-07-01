@@ -1,6 +1,35 @@
 # voice_assistant/conversation.py
 """
 Main conversation loop and management
+
+The LLM’s text output touches the speech layer in exactly one place:
+
+process_user_input()
+
+Builds assistant_response (the string that comes back from the Mistral / OpenAI chat call).
+
+Returns that string to the caller.
+
+conversation_loop()
+
+
+assistant_response = await self.process_user_input(user_text, mcp_client, tools)
+
+# ───► this is the only point where the text response is handed off to TTS
+if assistant_response and not self.state.interrupt_flag.is_set() \
+   and self.state.get_mode() != AssistantMode.STUCK_CHECK:
+    await speak_text(assistant_response, self.state, self.config)
+speak_text() (imported from voice_assistant/speech.py) is your text-to-speech gateway. Whatever engine you configure there—Coqui TTS “Nova”, a cloud TTS, etc.—will synthesize assistant_response and play or stream it.
+
+The same helper is called for system messages (greetings, error notices, stuck-mode wake-ups), but the only place the LLM’s inference is voiced is in that await speak_text(assistant_response, …) block.
+
+So to get the Mistral 7B output to come back in Nova’s voice:
+
+Wire the Coqui TTS Nova model inside speech.py’s speak_text() (or whichever function it delegates to).
+
+Make sure self.config fields (e.g., tts_model, tts_voice, audio device) point at Nova.
+
+Nothing else in the conversation manager needs to change—the handoff already happens through that single call.
 """
 
 import asyncio

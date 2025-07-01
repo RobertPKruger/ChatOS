@@ -291,36 +291,6 @@ def search_app(query: str) -> str:
         return f"No apps found matching '{query}'"
 
 @mcp.tool()
-def open_folder(path: str = None) -> str:
-    """Open a folder in the system's file manager.
-    
-    Args:
-        path: Path to the folder to open (optional, defaults to user's home folder)
-    """
-    if not path:
-        path = os.path.expanduser("~")  # Default to user's home directory
-
-    try:
-        # Expand environment variables and resolve path
-        full_path = os.path.expandvars(os.path.expanduser(path))
-        if os.path.exists(full_path):
-            if platform.system() == "Windows":
-                subprocess.Popen(f'explorer "{full_path}"', shell=True)
-            elif platform.system() == "Darwin":  # macOS
-                subprocess.Popen(["open", full_path])
-            else:  # Linux/Unix
-                # Try common file managers
-                for fm in ["xdg-open", "nautilus", "dolphin", "thunar", "pcmanfm"]:
-                    if shutil.which(fm):
-                        subprocess.Popen([fm, full_path])
-                        break
-            return str(f"Opened folder: {full_path}")
-        else:
-            return str(f"Folder does not exist: {full_path}")
-    except Exception as e:
-        return str(f"Failed to open folder: {str(e)}")
-
-@mcp.tool()
 def launch_by_path(executable_path: str, args: str = "") -> str:
     """Launch an application by its full path (with safety restrictions).
     

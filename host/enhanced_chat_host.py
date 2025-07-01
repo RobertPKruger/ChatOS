@@ -9,6 +9,7 @@ import logging
 import signal
 import sys
 from pathlib import Path
+from voice_assistant.model_providers.factory import ModelProviderFactory
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -27,9 +28,49 @@ logger = logging.getLogger(__name__)
 state = AssistantState(config.vad_aggressiveness)
 audio_recorder = ContinuousAudioRecorder(config.sample_rate)
 
+
+def initialize_providers(config: Config, state: AssistantState):
+    """Initialize model providers based on configuration"""
+    try:
+        # Create transcription provider
+        state.transcription_provider = ModelProviderFactory.create_transcription_provider(
+            provider_type=config.transcription_provider,
+            api_key=config.openai_api_key,
+            model=config.stt_model
+        )
+        logger.info(f"Initialized transcription provider: {config.transcription_provider}")
+        
+        # Create chat provider
+        state.chat_provider = ModelProviderFactory.create_chat_provider(
+            provider_type=config.chat_provider,
+            api_key=config.openai_api_key
+        )
+        logger.info(f"Initialized chat provider: {config.chat_provider}")
+        
+        # Create TTS provider
+        state.tts_provider = ModelProviderFactory.create_tts_provider(
+            provider_type=config.tts_provider,
+            api_key=config.openai_api_key,
+            model=config.tts_model,
+            voice=config.tts_voice
+        )
+        logger.info(f"Initialized TTS provider: {config.tts_provider}")
+        
+        # For backward compatibility, also set openai_client if using OpenAI
+        if config.transcription_provider == "openai" or config.chat_provider == "openai" or config.tts_provider == "openai":
+            from openai import OpenAI
+            state.openai_client = OpenAI(api_key=config.openai_api_key)
+            
+    except Exception as e:
+        logger.error(f"Failed to initialize providers: {e}")
+        raise
+
 async def run_forever():
     """Run the assistant with automatic restart on failure"""
     restart_count = 0
+
+    initialize_providers(config, state)
+    
     conversation_manager = ConversationManager(config, state, audio_recorder)
     
     while state.running:
