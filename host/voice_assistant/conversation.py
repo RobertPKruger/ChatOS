@@ -137,23 +137,62 @@ class ConversationManager:
         # Get the most recent tool result
         last_result = tool_results[-1] if tool_results else ""
         
+        # Extract text content from various formats
+        def extract_text(result):
+            """Extract plain text from various result formats"""
+            if result is None:
+                return ""
+            
+            # If it's already a string, return it
+            if isinstance(result, str):
+                return result
+            
+            # If it's a TextContent object with .text attribute
+            if hasattr(result, 'text'):
+                return result.text
+            
+            # If it's a list, try to extract from first element
+            if isinstance(result, list) and len(result) > 0:
+                first_item = result[0]
+                if hasattr(first_item, 'text'):
+                    return first_item.text
+                elif isinstance(first_item, str):
+                    return first_item
+                else:
+                    return str(first_item)
+            
+            # If it's a dict, look for common text fields
+            if isinstance(result, dict):
+                for key in ['text', 'content', 'message', 'result']:
+                    if key in result:
+                        return str(result[key])
+            
+            # Fallback: convert to string
+            return str(result)
+        
+        # Extract the actual text content
+        result_text = extract_text(last_result)
+        
+        # Clean up any remaining formatting artifacts
+        result_text = result_text.strip()
+        
         # Try to extract meaningful content from tool result
-        if isinstance(last_result, str):
+        if result_text:
             # If it's a steam games list
-            if "Steam Games" in last_result or "App ID:" in last_result:
-                return f"Here are your Steam games:\n{last_result}"
+            if "Steam Games" in result_text or "App ID:" in result_text:
+                return f"Here are your Steam games:\n{result_text}"
             
             # If it's about launching something
-            elif "Launched" in last_result or "opened" in last_result.lower():
-                return last_result
+            elif "Launched" in result_text or "opened" in result_text.lower():
+                return result_text
             
             # If it's a list of files or directories
-            elif "Directory" in last_result or "Files:" in last_result:
-                return f"Here's what I found:\n{last_result}"
+            elif "Directory" in result_text or "Files:" in result_text:
+                return f"Here's what I found:\n{result_text}"
             
             # For any other tool result, present it clearly
-            elif len(last_result.strip()) > 10:  # Non-trivial result
-                return f"Here's the result:\n{last_result}"
+            elif len(result_text) > 10:  # Non-trivial result
+                return result_text  # Just return the clean text directly
         
         # If we can't improve it, return the original
         return response_content
