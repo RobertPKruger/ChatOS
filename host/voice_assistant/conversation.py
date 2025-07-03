@@ -1,4 +1,4 @@
-# voice_assistant/conversation.py - FULLY FIXED VERSION
+# voice_assistant/conversation.py - MINIMAL FIX VERSION
 """
 Main conversation loop and management with proper tool handling for local vs backup models
 """
@@ -100,6 +100,63 @@ class ConversationManager:
             return primary_class_name in ["OpenAIChatProvider", "OpenAIChatCompletionProvider"]
         
         return provider_class_name in ["OpenAIChatProvider", "OpenAIChatCompletionProvider"]
+    
+    def _detect_poor_tool_response(self, response_content: str, has_tool_results: bool = False) -> bool:
+        """Detect if a response is too generic after tool execution"""
+        if not has_tool_results:
+            return False
+        
+        poor_phrases = [
+            "task completed",
+            "done",
+            "finished", 
+            "completed successfully",
+            "all set",
+            "ready",
+            "task complete",
+            "operation completed"
+        ]
+        
+        response_lower = response_content.lower().strip()
+        
+        # Check if response is very short and contains generic phrases
+        if len(response_lower) < 100:  # Short response
+            for phrase in poor_phrases:
+                if phrase in response_lower:
+                    # If the response is mostly just the generic phrase, it's poor
+                    if len(response_lower) < len(phrase) + 30:
+                        return True
+        
+        return False
+    
+    def _improve_tool_response(self, response_content: str, tool_results: list) -> str:
+        """Improve a generic response by incorporating actual tool results"""
+        if not tool_results:
+            return response_content
+        
+        # Get the most recent tool result
+        last_result = tool_results[-1] if tool_results else ""
+        
+        # Try to extract meaningful content from tool result
+        if isinstance(last_result, str):
+            # If it's a steam games list
+            if "Steam Games" in last_result or "App ID:" in last_result:
+                return f"Here are your Steam games:\n{last_result}"
+            
+            # If it's about launching something
+            elif "Launched" in last_result or "opened" in last_result.lower():
+                return last_result
+            
+            # If it's a list of files or directories
+            elif "Directory" in last_result or "Files:" in last_result:
+                return f"Here's what I found:\n{last_result}"
+            
+            # For any other tool result, present it clearly
+            elif len(last_result.strip()) > 10:  # Non-trivial result
+                return f"Here's the result:\n{last_result}"
+        
+        # If we can't improve it, return the original
+        return response_content
     
     async def process_user_input(self, user_text: str, mcp_client, tools):
         """Process user input and generate response"""
@@ -318,6 +375,12 @@ class ConversationManager:
                 
                 # Get the model's follow-up response if not interrupted and all tools succeeded
                 if not self.state.interrupt_flag.is_set() and self.state.get_mode() != AssistantMode.STUCK_CHECK:
+                    # Track tool results for potential improvement
+                    tool_results = []
+                    for msg in self.state.conversation_history:
+                        if msg.get("role") == "tool":
+                            tool_results.append(msg.get("content", ""))
+                    
                     # For follow-up, use the same tools logic
                     if use_tools:
                         follow_up = self.state.chat_provider.complete(
@@ -332,6 +395,14 @@ class ConversationManager:
                     
                     follow_up_message = follow_up.choices[0].message
                     assistant_response = follow_up_message.content or "Task completed."
+                    
+                    # Check if the response is too generic and improve it
+                    if self._detect_poor_tool_response(assistant_response, bool(tool_results)):
+                        logger.info("Detected poor tool response, improving...")
+                        improved_response = self._improve_tool_response(assistant_response, tool_results)
+                        if improved_response != assistant_response:
+                            assistant_response = improved_response
+                            logger.info("Improved generic response with actual tool results")
                     
                     self.state.conversation_history.append({
                         "role": "assistant", 

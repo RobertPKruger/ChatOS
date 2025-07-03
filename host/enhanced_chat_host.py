@@ -1,6 +1,6 @@
-# enhanced_chat_host_v3.py
+# enhanced_chat_host.py - WITH CLI SUPPORT
 """
-Enhanced MCP Chat Host - Version 3 with improved voice responsiveness
+Enhanced MCP Chat Host - Version 3 with CLI mode support
 Modularized architecture for better maintainability
 """
 
@@ -8,6 +8,7 @@ import asyncio
 import logging
 import signal
 import sys
+import os
 from pathlib import Path
 from voice_assistant.model_providers.factory import ModelProviderFactory
 from voice_assistant.model_providers.failover_chat import FailoverChatProvider
@@ -27,8 +28,10 @@ setup_logging(config)
 logger = logging.getLogger(__name__)
 
 state = AssistantState(config.vad_aggressiveness)
-audio_recorder = ContinuousAudioRecorder(config.sample_rate)
 
+def check_cli_mode():
+    """Check if CLI mode is enabled via environment variable"""
+    return os.getenv("CHATOS_CLI_MODE", "false").lower() in ["true", "1", "yes", "on"]
 
 def initialize_providers(config: Config, state: AssistantState):
     """Initialize model providers based on configuration"""
@@ -37,14 +40,14 @@ def initialize_providers(config: Config, state: AssistantState):
         primary_chat = ModelProviderFactory.create_chat_provider(
             provider_type="ollama",
             model=config.local_chat_model,          
-            host=config.ollama_host                 # default http://localhost:11434
+            host=config.ollama_host
         )
 
-        # 2. Build the backup (OpenAI o3)
+        # 2. Build the backup (OpenAI)
         backup_chat = ModelProviderFactory.create_chat_provider(
             provider_type="openai",
             api_key=config.openai_api_key,
-            model=config.frontier_chat_model        # "o3"
+            model=config.frontier_chat_model
         )
 
         # 3. Wrap them
@@ -62,23 +65,24 @@ def initialize_providers(config: Config, state: AssistantState):
             f"TTS={config.tts_model}"
         )
 
-        # Create transcription provider
-        state.transcription_provider = ModelProviderFactory.create_transcription_provider(
-            provider_type=config.transcription_provider,
-            api_key=config.openai_api_key,
-            model=config.stt_model
-        )
-        logger.info(f"Initialized transcription provider: {config.transcription_provider}")
-        
-        
-        # Create TTS provider
-        state.tts_provider = ModelProviderFactory.create_tts_provider(
-            provider_type=config.tts_provider,
-            api_key=config.openai_api_key,
-            model=config.tts_model,
-            voice=config.tts_voice
-        )
-        logger.info(f"Initialized TTS provider: {config.tts_provider}")
+        # Create transcription and TTS providers only for voice mode
+        if not check_cli_mode():
+            # Create transcription provider
+            state.transcription_provider = ModelProviderFactory.create_transcription_provider(
+                provider_type=config.transcription_provider,
+                api_key=config.openai_api_key,
+                model=config.stt_model
+            )
+            logger.info(f"Initialized transcription provider: {config.transcription_provider}")
+            
+            # Create TTS provider
+            state.tts_provider = ModelProviderFactory.create_tts_provider(
+                provider_type=config.tts_provider,
+                api_key=config.openai_api_key,
+                model=config.tts_model,
+                voice=config.tts_voice
+            )
+            logger.info(f"Initialized TTS provider: {config.tts_provider}")
         
         # For backward compatibility, also set openai_client if using OpenAI
         if config.transcription_provider == "openai" or config.chat_provider == "openai" or config.tts_provider == "openai":
@@ -89,8 +93,9 @@ def initialize_providers(config: Config, state: AssistantState):
         logger.error(f"Failed to initialize providers: {e}")
         raise
 
-async def run_forever():
-    """Run the assistant with automatic restart on failure"""
+async def run_voice_mode():
+    """Run the voice assistant"""
+    audio_recorder = ContinuousAudioRecorder(config.sample_rate)
     restart_count = 0
 
     initialize_providers(config, state)
@@ -118,26 +123,42 @@ async def run_forever():
             logger.info(f"Restarting in {config.reconnect_delay} seconds...")
             await asyncio.sleep(config.reconnect_delay)
 
+async def run_cli_mode():
+    """Run the CLI interface"""
+    from enhanced_cli_chat_host import enhanced_cli_main
+    await enhanced_cli_main()
+
 def main():
-    """Main entry point"""
+    """Main entry point - chooses between CLI and voice mode"""
+    
+    # Check mode
+    cli_mode = check_cli_mode()
+    
+    if cli_mode:
+        logger.info("🖥️  Starting ChatOS in CLI mode")
+        print("🖥️  ChatOS CLI Mode")
+        print("📝 Set CHATOS_CLI_MODE=false to use voice mode")
+    else:
+        logger.info("🎤 Starting ChatOS in Voice mode")
+        logger.info(f"Mode: Smart listening with processing timeout ({config.processing_timeout}s)")
+        logger.info(f"Wake phrase when stuck: '{config.stuck_phrase}'")
+    
     # Register signal handlers
     signal.signal(signal.SIGINT, lambda s, f: signal_handler(s, f, state))
     signal.signal(signal.SIGTERM, lambda s, f: signal_handler(s, f, state))
     
-    logger.info("Voice Assistant starting up...")
-
-    logger.info(f"Mode: Smart listening with processing timeout ({config.processing_timeout}s)")
-    logger.info(f"Wake phrase when stuck: '{config.stuck_phrase}'")
-    
     try:
-        asyncio.run(run_forever())
+        if cli_mode:
+            asyncio.run(run_cli_mode())
+        else:
+            asyncio.run(run_voice_mode())
     except KeyboardInterrupt:
         logger.info("\nShutdown complete")
     except Exception as e:
         logger.exception(f"Fatal error: {e}")
         sys.exit(1)
     
-    logger.info("Voice Assistant shutdown complete")
+    logger.info("ChatOS shutdown complete")
 
 if __name__ == "__main__":
     main()
