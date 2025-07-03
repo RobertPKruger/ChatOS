@@ -10,7 +10,8 @@
       "excel": ["excel", "microsoft excel", "spreadsheet", "sheets"],
       "word": ["word", "microsoft word", "winword", "document", "docs"],
       "outlook": ["outlook", "email", "mail", "microsoft outlook"],
-      "code": ["code", "vscode", "visual studio code", "vs code", "editor"]
+      "code": ["code", "vscode", "visual studio code", "vs code", "editor"],
+      "gcai": ["garratt-callahan ai", "garratt callahan ai", "garrattcallahan ai", "garrattcallahan-ai", "garratt-callahan-ai"]
     },
     
     "darwin": {
@@ -45,6 +46,8 @@
     "registry editor": ["regedit.exe"],
     "settings": ["ms-settings:"],
     "windows settings": ["ms-settings:"],
+    "gcai": ["C:\\Users\\comma\\Projects\\ChatOS\\mcp_os\\gcai_launcher.cmd"],
+    "garratt-callahan ai": ["C:\\Users\\comma\\Projects\\ChatOS\\mcp_os\\gcai_launcher.cmd"],
     "word": [
       "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
       "winword.exe",

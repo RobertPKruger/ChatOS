@@ -204,8 +204,56 @@ class ConversationManager:
                                 else:
                                     clean_history.append(msg)
                             
+                            # Validate conversation history - remove orphaned tool_calls
+                            validated_history = []
+                            i = 0
+                            while i < len(clean_history):
+                                msg = clean_history[i]
+                                
+                                # If this is an assistant message with tool_calls
+                                if (msg.get('role') == 'assistant' and 
+                                    msg.get('tool_calls')):
+                                    
+                                    # Check if all tool_calls have corresponding tool responses
+                                    tool_call_ids = [tc['id'] for tc in msg['tool_calls']]
+                                    validated_msg = dict(msg)
+                                    validated_history.append(validated_msg)
+                                    
+                                    # Look for corresponding tool responses
+                                    j = i + 1
+                                    found_responses = set()
+                                    
+                                    while j < len(clean_history) and clean_history[j].get('role') == 'tool':
+                                        tool_response = clean_history[j]
+                                        tool_call_id = tool_response.get('tool_call_id')
+                                        if tool_call_id in tool_call_ids:
+                                            validated_history.append(tool_response)
+                                            found_responses.add(tool_call_id)
+                                        j += 1
+                                    
+                                    # If some tool_calls don't have responses, remove them
+                                    if len(found_responses) < len(tool_call_ids):
+                                        logger.warning(f"Removing orphaned tool_calls: {set(tool_call_ids) - found_responses}")
+                                        # Filter out tool_calls that don't have responses
+                                        validated_msg['tool_calls'] = [
+                                            tc for tc in validated_msg['tool_calls'] 
+                                            if tc['id'] in found_responses
+                                        ]
+                                        
+                                        # If no tool_calls remain, convert to regular response
+                                        if not validated_msg['tool_calls']:
+                                            validated_msg.pop('tool_calls', None)
+                                            if not validated_msg.get('content'):
+                                                validated_msg['content'] = "I'll help you with that."
+                                    
+                                    i = j  # Skip the tool responses we already processed
+                                else:
+                                    # Regular message
+                                    validated_history.append(msg)
+                                    i += 1
+                            
                             fallback_completion = backup_provider.complete(
-                                messages=clean_history,
+                                messages=validated_history,
                                 tools=tools,
                                 tool_choice="auto"
                             )
