@@ -1,4 +1,4 @@
-# voice_assistant/state.py
+# voice_assistant/state.py - FIXED SYSTEM PROMPT
 """
 State management for the voice assistant
 """
@@ -22,41 +22,37 @@ from .model_providers.base import TranscriptionProvider, ChatCompletionProvider,
 
 logger = logging.getLogger(__name__)
 
-# System prompt
-SYSTEM_PROMPT = """
-You are my personal voice assistant. Keep responses conversational and natural, but concise.
+# FIXED System prompt for proper tool calling
+SYSTEM_PROMPT = """You are a helpful voice assistant with access to tools. When you need to use a tool, respond with ONLY a JSON object in this exact format:
 
-When the user asks to open an application like "Open Notepad" or "Launch Calculator", use the launch_app tool and provide the appropriate app name as a parameter. For example:
-- For "Open Notepad" → use launch_app with app="notepad"
-- For "Open Calculator" → use launch_app with app="calc"
-- For "Open File Explorer" → use launch_app with app="explorer"
+{"name": "tool_name", "arguments": {"parameter": "value"}}
 
-Steam Game Commands:
-- For "Open Steam" or "Launch Steam" → use open_steam tool
-- For "Open Steam store/library/community" → use open_steam with the appropriate page parameter
-- For "Play [game name]" or "Launch [game name]" → use launch_steam_game with game_name parameter
-- For "What games do I have?" → use list_steam_games
-- Common game examples:
-  - "Play Counter-Strike" → launch_steam_game(game_name="Counter-Strike 2")
-  - "Launch Dota" → launch_steam_game(game_name="Dota 2")
-  - "Open Team Fortress 2" → launch_steam_game(game_name="Team Fortress 2")
-  - "Play game 730" → launch_steam_game(app_id="730")
+CRITICAL: Do not explain what you're doing. Do not say "I'll use the tool" or describe your actions. Just return the JSON tool call when needed.
 
-Always provide the appropriate parameters when using tools.
+Available tools and their exact formats:
 
-If you encounter any errors with tools, explain what went wrong and suggest alternatives when possible.
+Application Tools:
+- To open applications: {"name": "launch_app", "arguments": {"app_name": "notepad"}}
+  Examples:
+  * Open Notepad → {"name": "launch_app", "arguments": {"app_name": "notepad"}}
+  * Open Calculator → {"name": "launch_app", "arguments": {"app_name": "calc"}}
+  * Open Word → {"name": "launch_app", "arguments": {"app_name": "winword"}}
+  * Open Excel → {"name": "launch_app", "arguments": {"app_name": "excel"}}
+  * Open File Explorer → {"name": "launch_app", "arguments": {"app_name": "explorer"}}
 
-File-system examples
---------------------
-- "Create a folder called Projects inside Documents"
-  → create_folder(path="~/Documents/Projects")
-- "Create a folder named Projects on my desktop"
-  → create_folder(path="~/Desktop/Projects")
-- "Open my desktop folder"
-  → open_folder(path="~/Desktop")
+Steam Tools:
+- Open Steam: {"name": "open_steam", "arguments": {}}
+- Open Steam store: {"name": "open_steam", "arguments": {"page": "store"}}
+- Launch games: {"name": "launch_steam_game", "arguments": {"game_name": "Counter-Strike 2"}}
+- List games: {"name": "list_steam_games", "arguments": {}}
 
-When the user asks to shut down, exit, or quit, acknowledge and prepare to shut down the system.
-"""
+File System Tools:
+- Create folder: {"name": "create_folder", "arguments": {"path": "~/Desktop/Projects"}}
+- Open folder: {"name": "open_folder", "arguments": {"path": "~/Desktop"}}
+
+For conversation without tools, respond normally and naturally. Keep responses conversational but concise.
+
+Remember: When using tools, respond with ONLY the JSON object. No explanations, no descriptions, just the tool call."""
 
 class AssistantMode(Enum):
     """Assistant operational modes"""

@@ -1,7 +1,8 @@
-# voice_assistant/model_providers/failover_chat.py
+# voice_assistant/model_providers/failover_chat.py - FIXED WITH TOOL PARSING
 import json
 import logging
 import time
+import re
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as _TimeoutError
 from typing import List, Dict, Any, Union
 
@@ -37,6 +38,235 @@ class StandardizedResponse:
                 })(),
                 'finish_reason': 'stop'
             })()]
+
+
+def _parse_tool_calls_from_text(content: str) -> List[Dict[str, Any]]:
+    """
+    Parse tool calls from text that might contain JSON arrays or objects
+    """
+    if not content or not content.strip():
+        return []
+    
+    tool_calls = []
+    content = content.strip()
+    
+    # First, extract content from code blocks if present
+    code_block_patterns = [
+        r'```(?:python|json|javascript)?\s*\n?(.*?)\n?```',  # ```python\n{...}\n```
+        r'`([^`]+)`',  # Single backticks
+    ]
+    
+    extracted_content = content
+    for pattern in code_block_patterns:
+        matches = re.findall(pattern, content, re.DOTALL | re.IGNORECASE)
+        for match in matches:
+            # Replace the original content with the extracted content
+            extracted_content = match.strip()
+            break  # Use the first match
+    
+    logger.debug(f"Extracted content from code blocks: '{extracted_content[:200]}...'")
+    
+    # Look for JSON arrays or objects that might be tool calls
+    json_patterns = [
+        # Array of objects: [{"name": "...", "arguments": {...}}]
+        r'\[\s*\{\s*"name"\s*:\s*"[^"]*"\s*,\s*"arguments"\s*:\s*\{[^}]*\}\s*\}\s*(?:,\s*\{\s*"name"\s*:\s*"[^"]*"\s*,\s*"arguments"\s*:\s*\{[^}]*\}\s*\}\s*)*\]',
+        # Single object: {"name": "...", "arguments": {...}}
+        r'\{\s*"name"\s*:\s*"([^"]*?)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})\s*\}',
+        # Relaxed single object: {"name": "..."}
+        r'\{\s*"name"\s*:\s*"([^"]*?)"\s*(?:,\s*"arguments"\s*:\s*(\{[^}]*\}))?\s*\}',
+        # Function call pattern: function_name(args)
+        r'(\w+)\s*\(\s*([^)]*)\s*\)'
+    ]
+    
+    # Track what we've already found to avoid duplicates
+    found_calls = set()
+    
+    for pattern in json_patterns:
+        matches = re.findall(pattern, extracted_content, re.DOTALL | re.IGNORECASE)
+        
+        for match in matches:
+            try:
+                if pattern == json_patterns[3]:  # Function call pattern
+                    func_name, args_str = match
+                    
+                    # Skip if we already found this call
+                    call_signature = f"{func_name}:{args_str.strip()}"
+                    if call_signature in found_calls:
+                        continue
+                    found_calls.add(call_signature)
+                    
+                    # Try to parse arguments
+                    try:
+                        args_dict = json.loads(args_str) if args_str.strip() else {}
+                    except:
+                        # Parse specific patterns for different tools
+                        args_dict = {}
+                        if args_str.strip():
+                            if func_name == 'launch_app':
+                                # Look for app name in various formats
+                                app_patterns = [
+                                    r"app_name['\"]?\s*[:=]\s*['\"]?([^'\"]+)['\"]?",
+                                    r"app['\"]?\s*[:=]\s*['\"]?([^'\"]+)['\"]?",
+                                    r"['\"]?([^'\"=,]+)['\"]?"  # Just the app name
+                                ]
+                                
+                                app_name = None
+                                for app_pattern in app_patterns:
+                                    app_match = re.search(app_pattern, args_str, re.IGNORECASE)
+                                    if app_match:
+                                        app_name = app_match.group(1).strip()
+                                        break
+                                
+                                if app_name:
+                                    args_dict = {"app_name": app_name}
+                                else:
+                                    args_dict = {"app_name": args_str.strip()}
+                            else:
+                                args_dict = {"input": args_str.strip()}
+                    
+                    tool_call = {
+                        'id': f'call_{len(tool_calls) + 1}',
+                        'type': 'function',
+                        'function': {
+                            'name': func_name,
+                            'arguments': json.dumps(args_dict)
+                        }
+                    }
+                    tool_calls.append(tool_call)
+                    
+                elif pattern in [json_patterns[1], json_patterns[2]]:  # Named group patterns
+                    if len(match) >= 2:
+                        name = match[0]
+                        arguments_str = match[1] if match[1] else "{}"
+                        
+                        # Skip if we already found this call
+                        call_signature = f"{name}:{arguments_str.strip()}"
+                        if call_signature in found_calls:
+                            continue
+                        found_calls.add(call_signature)
+                        
+                        logger.debug(f"Extracted name: '{name}', arguments: '{arguments_str}'")
+                        
+                        try:
+                            arguments_dict = json.loads(arguments_str) if arguments_str else {}
+                        except:
+                            # If we can't parse the arguments, create a default based on the tool
+                            if name == 'launch_app':
+                                arguments_dict = {"app_name": "notepad"}  # Default fallback
+                            else:
+                                arguments_dict = {}
+                        
+                        tool_call = {
+                            'id': f'call_{len(tool_calls) + 1}',
+                            'type': 'function',
+                            'function': {
+                                'name': name,
+                                'arguments': json.dumps(arguments_dict)
+                            }
+                        }
+                        tool_calls.append(tool_call)
+                
+                else:
+                    # JSON pattern (array or complex object)
+                    json_text = match if isinstance(match, str) else match[0]
+                    
+                    try:
+                        parsed = json.loads(json_text)
+                    except json.JSONDecodeError:
+                        continue
+                    
+                    # Handle array of tool calls
+                    if isinstance(parsed, list):
+                        for item in parsed:
+                            if isinstance(item, dict) and 'name' in item:
+                                # Check for duplicates
+                                item_signature = f"{item['name']}:{json.dumps(item.get('arguments', {}))}"
+                                if item_signature not in found_calls:
+                                    found_calls.add(item_signature)
+                                    tool_call = _convert_to_openai_tool_call(item, len(tool_calls) + 1)
+                                    if tool_call:
+                                        tool_calls.append(tool_call)
+                    
+                    # Handle single tool call
+                    elif isinstance(parsed, dict) and 'name' in parsed:
+                        # Check for duplicates
+                        item_signature = f"{parsed['name']}:{json.dumps(parsed.get('arguments', {}))}"
+                        if item_signature not in found_calls:
+                            found_calls.add(item_signature)
+                            tool_call = _convert_to_openai_tool_call(parsed, len(tool_calls) + 1)
+                            if tool_call:
+                                tool_calls.append(tool_call)
+                            
+            except Exception as e:
+                logger.debug(f"Failed to parse potential tool call: {match} - {e}")
+                continue
+    
+    return tool_calls
+
+
+def _convert_to_openai_tool_call(parsed_call: Dict[str, Any], call_id: int) -> Dict[str, Any]:
+    """Convert a parsed tool call to OpenAI format"""
+    try:
+        name = parsed_call.get('name', '')
+        arguments = parsed_call.get('arguments', {})
+        
+        # Handle different argument formats
+        if isinstance(arguments, dict):
+            # Already a dict - convert to JSON string
+            arguments_str = json.dumps(arguments)
+        elif isinstance(arguments, str):
+            # String - might be JSON or key=value format
+            arguments = arguments.strip()
+            
+            # Try to parse as JSON first
+            try:
+                json.loads(arguments)  # Test if valid JSON
+                arguments_str = arguments
+            except json.JSONDecodeError:
+                # Not JSON - try to parse key=value format
+                logger.debug(f"Parsing non-JSON arguments: '{arguments}'")
+                
+                # Handle specific patterns for common tools
+                if name == 'launch_app':
+                    # Look for app name patterns
+                    app_patterns = [
+                        r"app_name['\"]?\s*[:=]\s*['\"]?([^'\"]+)['\"]?",
+                        r"app['\"]?\s*[:=]\s*['\"]?([^'\"]+)['\"]?",
+                        r"['\"]?([^'\"]+)['\"]?"  # Just the app name
+                    ]
+                    
+                    app_name = None
+                    for pattern in app_patterns:
+                        match = re.search(pattern, arguments, re.IGNORECASE)
+                        if match:
+                            app_name = match.group(1).strip()
+                            break
+                    
+                    if app_name:
+                        arguments_str = json.dumps({"app_name": app_name})
+                    else:
+                        # Fallback - use the whole thing as app_name
+                        arguments_str = json.dumps({"app_name": arguments})
+                else:
+                    # For other tools, wrap in a generic input field
+                    arguments_str = json.dumps({"input": arguments})
+        else:
+            # Other types - convert to string and wrap
+            arguments_str = json.dumps({"input": str(arguments)})
+        
+        logger.debug(f"Converted tool call - name: {name}, arguments: {arguments_str}")
+        
+        return {
+            'id': f'call_{call_id}',
+            'type': 'function', 
+            'function': {
+                'name': name,
+                'arguments': arguments_str
+            }
+        }
+    except Exception as e:
+        logger.debug(f"Failed to convert tool call: {e}")
+        return None
 
 
 def _serialize_tool_call(tool_call) -> Dict[str, Any]:
@@ -135,8 +365,6 @@ def _sanitize_for_ollama(history: List[Any]) -> List[Dict[str, Any]]:
     """
     Convert OpenAI message objects to plain dicts and remove unsupported roles.
     Keeps system/user/assistant; drops 'tool' role turns.
-    
-    Also handles tool_calls by converting them to text in the content.
     """
     safe = []
     allowed_roles = {"system", "user", "assistant"}
@@ -153,40 +381,10 @@ def _sanitize_for_ollama(history: List[Any]) -> List[Dict[str, Any]]:
             if tool_content is None:
                 tool_content = ''
             
-            # Look for the previous assistant message that called this tool
-            prev_msg = None
-            if i > 0:
-                prev_serialized = _serialize_message(history[i-1])
-                if prev_serialized.get('role') == 'assistant' and prev_serialized.get('tool_calls'):
-                    # Find which tool was called
-                    for tc in prev_serialized['tool_calls']:
-                        if tc.get('function', {}).get('name') == tool_name:
-                            prev_msg = prev_serialized
-                            break
-            
-            # Create a more informative message
-            if tool_name == 'launch_app' and 'launched successfully' in tool_content.lower():
-                app_name = 'the application'
-                # Try to extract app name from previous call
-                if prev_msg and prev_msg.get('tool_calls'):
-                    for tc in prev_msg['tool_calls']:
-                        if tc.get('function', {}).get('name') == 'launch_app':
-                            args = tc.get('function', {}).get('arguments', '{}')
-                            try:
-                                args_dict = json.loads(args)
-                                app_name = args_dict.get('app_name', 'the application')
-                            except:
-                                pass
-                
-                converted = {
-                    'role': 'assistant',
-                    'content': f"I've successfully opened {app_name} for you. The application should now be running."
-                }
-            else:
-                converted = {
-                    'role': 'assistant',
-                    'content': f"[Tool {tool_name} result]: {tool_content}"
-                }
+            converted = {
+                'role': 'assistant',
+                'content': f"[Tool {tool_name} result]: {tool_content}"
+            }
             
             safe.append(converted)
             continue
@@ -200,36 +398,8 @@ def _sanitize_for_ollama(history: List[Any]) -> List[Dict[str, Any]]:
         if serialized.get('content') is None:
             serialized['content'] = ''
         
-        # For Ollama, we need to handle tool_calls differently
-        # since it doesn't support OpenAI's tool calling format
-        if 'tool_calls' in serialized and serialized['tool_calls']:
-            # Convert tool calls to text description
-            tool_descriptions = []
-            for tc in serialized['tool_calls']:
-                func = tc.get('function', {})
-                name = func.get('name', 'unknown')
-                args = func.get('arguments', '{}')
-                
-                # Create more natural descriptions
-                if name == 'launch_app':
-                    try:
-                        args_dict = json.loads(args)
-                        app_name = args_dict.get('app_name', 'unknown')
-                        tool_descriptions.append(f"I'll open {app_name} for you.")
-                    except:
-                        tool_descriptions.append(f"I'll call the {name} function with args: {args}")
-                else:
-                    tool_descriptions.append(f"I'll call the {name} function with args: {args}")
-            
-            # Append tool descriptions to content
-            original_content = serialized.get('content', '').strip()
-            if original_content:
-                serialized['content'] = f"{original_content}\n\n" + "\n".join(tool_descriptions)
-            else:
-                serialized['content'] = "\n".join(tool_descriptions)
-            
-            # Remove tool_calls from the message since Ollama doesn't understand them
-            serialized.pop('tool_calls', None)
+        # Remove tool_calls from messages since Ollama doesn't understand them
+        serialized.pop('tool_calls', None)
         
         safe.append(serialized)
     
@@ -238,18 +408,16 @@ def _sanitize_for_ollama(history: List[Any]) -> List[Dict[str, Any]]:
 
 class FailoverChatProvider:
     """
-    Tries the primary chat provider (e.g. phi3 via Ollama) first.
+    Tries the primary chat provider (e.g. Mistral via Ollama) first.
     On any exception *or* timeout it logs a warning and transparently
     falls back to the backup provider (e.g. OpenAI).
-
-    All calls are **synchronous**; no `async/await` required upstream.
     """
     def __init__(self, primary, backup, timeout: float = 30.0):
         self.primary = primary
         self.backup = backup
-        self.timeout = timeout      # seconds
+        self.timeout = timeout
         self.last_provider: str | None = None
-        self.call_count = 0  # Track number of calls
+        self.call_count = 0
 
     def complete(self, messages, **kwargs):
         """
@@ -302,20 +470,65 @@ class FailoverChatProvider:
                 content = reply.message
             elif hasattr(reply, 'choices') and reply.choices:
                 # Already in OpenAI format
+                choice = reply.choices[0]
+                message = choice.message
+                content = getattr(message, 'content', '')
+                
+                # Check if the content contains tool calls as text
+                if content and not getattr(message, 'tool_calls', None):
+                    logger.debug(f"Raw content from local model: '{content}'")
+                    parsed_tool_calls = _parse_tool_calls_from_text(content)
+                    if parsed_tool_calls:
+                        logger.info(f"🔧 Parsed {len(parsed_tool_calls)} tool calls from local model text")
+                        logger.debug(f"Parsed tool calls: {parsed_tool_calls}")
+                        
+                        # Create proper tool call objects that are JSON serializable
+                        tool_call_objects = []
+                        for tc in parsed_tool_calls:
+                            # Create simple objects that can be easily serialized
+                            tool_call_obj = type('ToolCall', (), {
+                                'id': tc['id'],
+                                'type': tc['type'],
+                                'function': type('Function', (), {
+                                    'name': tc['function']['name'],
+                                    'arguments': tc['function']['arguments']
+                                })()
+                            })()
+                            tool_call_objects.append(tool_call_obj)
+                        
+                        # Update the message with tool calls
+                        message.tool_calls = tool_call_objects
+                        choice.finish_reason = 'tool_calls'
+                        
+                        # Clear the content since it's now represented as tool calls
+                        message.content = ''
+                        
+                        self.last_provider = "local"
+                        logger.info(f"✅ Local model with parsed tool calls")
+                        return reply
+                
                 self.last_provider = "local"
-                logger.info(f"Local model returned OpenAI-style response")
+                logger.info(f"✅ Local model returned: '{content[:100] if content else 'Empty'}...'")
                 return reply
             else:
                 # Try to convert to string
                 content = str(reply)
             
-            # Validate the content - empty or generic responses indicate failure
-            if not content or content.strip() in ["", "Task completed.", "Task completed"]:
-                logger.warning(f"Local model returned empty or generic response: '{content}'")
-                raise ValueError("Invalid response from local model")
+            # Check if content contains tool calls as text
+            if content:
+                parsed_tool_calls = _parse_tool_calls_from_text(content)
+                if parsed_tool_calls:
+                    logger.info(f"🔧 Parsed {len(parsed_tool_calls)} tool calls from local model")
+                    self.last_provider = "local"
+                    return StandardizedResponse(content='', tool_calls=parsed_tool_calls)
+            
+            # Validate the content
+            if not content or content.strip() == "":
+                logger.warning("Local model returned empty response")
+                raise ValueError("Local model returned empty response")
 
             self.last_provider = "local"
-            logger.info(f"Successfully used local model. Response: {content[:100] if content else 'None'}...")
+            logger.info(f"✅ Local model response: '{content[:100] if content else 'None'}...'")
             
             # Return standardized response
             return StandardizedResponse(content=content, tool_calls=tool_calls)
@@ -328,7 +541,37 @@ class FailoverChatProvider:
             
             # 2. Fallback to frontier model
             try:
-                reply = self.backup.complete(messages, **kwargs)
+                # For the backup provider, we need to ensure all messages are serializable
+                serialized_messages = []
+                for msg in messages:
+                    if isinstance(msg, dict):
+                        # Already a dict - make sure tool_calls are serializable
+                        clean_msg = dict(msg)
+                        if 'tool_calls' in clean_msg and clean_msg['tool_calls']:
+                            # Convert tool calls to serializable format
+                            clean_tool_calls = []
+                            for tc in clean_msg['tool_calls']:
+                                if isinstance(tc, dict):
+                                    clean_tool_calls.append(tc)
+                                else:
+                                    # Convert object to dict
+                                    clean_tc = {
+                                        'id': getattr(tc, 'id', ''),
+                                        'type': getattr(tc, 'type', 'function'),
+                                        'function': {
+                                            'name': getattr(tc.function, 'name', '') if hasattr(tc, 'function') else '',
+                                            'arguments': getattr(tc.function, 'arguments', '{}') if hasattr(tc, 'function') else '{}'
+                                        }
+                                    }
+                                    clean_tool_calls.append(clean_tc)
+                            clean_msg['tool_calls'] = clean_tool_calls
+                        serialized_messages.append(clean_msg)
+                    else:
+                        # Convert to dict format for backup provider
+                        msg_dict = _serialize_message(msg)
+                        serialized_messages.append(msg_dict)
+                
+                reply = self.backup.complete(serialized_messages, **kwargs)
                 
                 # Check if it's already in the expected format
                 if hasattr(reply, 'choices') and reply.choices:

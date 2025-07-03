@@ -18,6 +18,9 @@ cmd /k ^
     python mcp_os\server.py ^
 "
 
+REM Wait for server to be ready
+timeout /t 3 /nobreak > nul
+
 REM ── 3.  Activate the host venv in *this* window and run the UI ────────
 call "%HOST_VENV%\Scripts\activate.bat"
 python host\enhanced_chat_host.py

@@ -1,35 +1,6 @@
-# voice_assistant/conversation.py
+# voice_assistant/conversation.py - FULLY FIXED VERSION
 """
-Main conversation loop and management
-
-The LLM’s text output touches the speech layer in exactly one place:
-
-process_user_input()
-
-Builds assistant_response (the string that comes back from the Mistral / OpenAI chat call).
-
-Returns that string to the caller.
-
-conversation_loop()
-
-
-assistant_response = await self.process_user_input(user_text, mcp_client, tools)
-
-# ───► this is the only point where the text response is handed off to TTS
-if assistant_response and not self.state.interrupt_flag.is_set() \
-   and self.state.get_mode() != AssistantMode.STUCK_CHECK:
-    await speak_text(assistant_response, self.state, self.config)
-speak_text() (imported from voice_assistant/speech.py) is your text-to-speech gateway. Whatever engine you configure there—Coqui TTS “Nova”, a cloud TTS, etc.—will synthesize assistant_response and play or stream it.
-
-The same helper is called for system messages (greetings, error notices, stuck-mode wake-ups), but the only place the LLM’s inference is voiced is in that await speak_text(assistant_response, …) block.
-
-So to get the Mistral 7B output to come back in Nova’s voice:
-
-Wire the Coqui TTS Nova model inside speech.py’s speak_text() (or whichever function it delegates to).
-
-Make sure self.config fields (e.g., tts_model, tts_voice, audio device) point at Nova.
-
-Nothing else in the conversation manager needs to change—the handoff already happens through that single call.
+Main conversation loop and management with proper tool handling for local vs backup models
 """
 
 import asyncio
@@ -117,17 +88,40 @@ class ConversationManager:
             
         return False
     
+    def _should_use_tools_parameter(self, provider) -> bool:
+        """Determine if the provider supports OpenAI-style tools parameter"""
+        # Only use tools parameter for OpenAI-compatible providers
+        # Local models (Ollama) should use text-based tool calling
+        provider_class_name = provider.__class__.__name__
+        
+        if hasattr(provider, 'primary'):
+            # This is a FailoverChatProvider - check the primary provider
+            primary_class_name = provider.primary.__class__.__name__
+            return primary_class_name in ["OpenAIChatProvider", "OpenAIChatCompletionProvider"]
+        
+        return provider_class_name in ["OpenAIChatProvider", "OpenAIChatCompletionProvider"]
+    
     async def process_user_input(self, user_text: str, mcp_client, tools):
         """Process user input and generate response"""
         # Add user message to history
         self.state.conversation_history.append({"role": "user", "content": user_text})
         
         try:
-            completion = self.state.chat_provider.complete(
-                messages=self.state.conversation_history,
-                tools=tools,
-                tool_choice="auto"
-            )
+            # Determine if we should pass tools parameter based on the provider
+            use_tools = self._should_use_tools_parameter(self.state.chat_provider)
+            
+            if use_tools:
+                # OpenAI-compatible provider - use tools parameter
+                completion = self.state.chat_provider.complete(
+                    messages=self.state.conversation_history,
+                    tools=tools,
+                    tool_choice="auto"
+                )
+            else:
+                # Local model - no tools parameter (will use text parsing)
+                completion = self.state.chat_provider.complete(
+                    messages=self.state.conversation_history
+                )
 
             choice  = completion.choices[0]
             message = choice.message
@@ -149,25 +143,144 @@ class ConversationManager:
                         logger.info("Processing interrupted")
                         self.state.set_mode(AssistantMode.LISTENING)
                         return None
-                        
-                    tool_result = await call_tool_with_timeout(
-                        mcp_client, tool_call, self.config.tool_timeout
-                    )
                     
-                    # Add tool result to history
-                    self.state.conversation_history.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call.id,
-                        "content": tool_result
-                    })
+                    try:
+                        tool_result = await call_tool_with_timeout(
+                            mcp_client, tool_call, self.config.tool_timeout
+                        )
+                        
+                        # Add tool result to history
+                        self.state.conversation_history.append({
+                            "role": "tool",
+                            "tool_call_id": tool_call.id,
+                            "content": tool_result
+                        })
+                        
+                    except Exception as tool_error:
+                        # Tool failed - clean up and trigger manual fallback
+                        logger.warning(f"Tool {tool_call.function.name} failed: {tool_error}")
+                        
+                        # Remove the assistant message with tool_calls that we just added
+                        if (self.state.conversation_history and 
+                            self.state.conversation_history[-1].get("role") == "assistant" and
+                            "tool_calls" in self.state.conversation_history[-1]):
+                            self.state.conversation_history.pop()
+                        
+                        # Manually trigger OpenAI fallback for this request
+                        logger.info("Tool failed - manually triggering OpenAI fallback")
+                        
+                        try:
+                            # Force OpenAI to handle the original request
+                            from .model_providers.openai_chat import OpenAIChatProvider
+                            backup_provider = OpenAIChatProvider(
+                                api_key=self.config.openai_api_key,
+                                model=self.config.frontier_chat_model
+                            )
+                            
+                            # Clean the conversation history for OpenAI (serialize tool calls)
+                            clean_history = []
+                            for msg in self.state.conversation_history:
+                                if isinstance(msg, dict):
+                                    clean_msg = dict(msg)
+                                    if 'tool_calls' in clean_msg and clean_msg['tool_calls']:
+                                        # Serialize tool calls properly
+                                        clean_tool_calls = []
+                                        for tc in clean_msg['tool_calls']:
+                                            if isinstance(tc, dict):
+                                                clean_tool_calls.append(tc)
+                                            else:
+                                                # Convert object to dict
+                                                clean_tc = {
+                                                    'id': getattr(tc, 'id', ''),
+                                                    'type': getattr(tc, 'type', 'function'),
+                                                    'function': {
+                                                        'name': getattr(tc.function, 'name', '') if hasattr(tc, 'function') else '',
+                                                        'arguments': getattr(tc.function, 'arguments', '{}') if hasattr(tc, 'function') else '{}'
+                                                    }
+                                                }
+                                                clean_tool_calls.append(clean_tc)
+                                        clean_msg['tool_calls'] = clean_tool_calls
+                                    clean_history.append(clean_msg)
+                                else:
+                                    clean_history.append(msg)
+                            
+                            fallback_completion = backup_provider.complete(
+                                messages=clean_history,
+                                tools=tools,
+                                tool_choice="auto"
+                            )
+                            
+                            fallback_choice = fallback_completion.choices[0]
+                            fallback_message = fallback_choice.message
+                            
+                            # Handle OpenAI's response (might include tool calls)
+                            if fallback_choice.finish_reason == "tool_calls" and fallback_message.tool_calls:
+                                # Add OpenAI's assistant message
+                                self.state.conversation_history.append({
+                                    "role": "assistant",
+                                    "content": fallback_message.content,
+                                    "tool_calls": fallback_message.tool_calls
+                                })
+                                
+                                # Execute OpenAI's tool calls
+                                for backup_tool_call in fallback_message.tool_calls:
+                                    try:
+                                        backup_result = await call_tool_with_timeout(
+                                            mcp_client, backup_tool_call, self.config.tool_timeout
+                                        )
+                                        
+                                        self.state.conversation_history.append({
+                                            "role": "tool",
+                                            "tool_call_id": backup_tool_call.id,
+                                            "content": backup_result
+                                        })
+                                    except Exception as backup_tool_error:
+                                        logger.error(f"Backup tool also failed: {backup_tool_error}")
+                                        return "I'm having trouble with that request. Please try being more specific."
+                                
+                                # Get OpenAI's follow-up
+                                final_completion = backup_provider.complete(
+                                    messages=self.state.conversation_history,
+                                    tools=tools,
+                                    tool_choice="auto"
+                                )
+                                
+                                final_response = final_completion.choices[0].message.content or "Task completed."
+                                self.state.conversation_history.append({
+                                    "role": "assistant",
+                                    "content": final_response
+                                })
+                                
+                                logger.info("Turn answered by: backup (manual fallback)")
+                                return final_response
+                            else:
+                                # OpenAI gave direct response
+                                response = fallback_message.content or "I can help you with that."
+                                self.state.conversation_history.append({
+                                    "role": "assistant",
+                                    "content": response
+                                })
+                                
+                                logger.info("Turn answered by: backup (manual fallback)")
+                                return response
+                                
+                        except Exception as fallback_error:
+                            logger.error(f"Manual fallback also failed: {fallback_error}")
+                            return "I'm having trouble processing your request. Please try again."
                 
-                # Get the model's follow-up response if not interrupted
+                # Get the model's follow-up response if not interrupted and all tools succeeded
                 if not self.state.interrupt_flag.is_set() and self.state.get_mode() != AssistantMode.STUCK_CHECK:
-                    follow_up = self.state.chat_provider.complete(
-                        messages=self.state.conversation_history,
-                        tools=tools,
-                        tool_choice="auto"
-                    )
+                    # For follow-up, use the same tools logic
+                    if use_tools:
+                        follow_up = self.state.chat_provider.complete(
+                            messages=self.state.conversation_history,
+                            tools=tools,
+                            tool_choice="auto"
+                        )
+                    else:
+                        follow_up = self.state.chat_provider.complete(
+                            messages=self.state.conversation_history
+                        )
                     
                     follow_up_message = follow_up.choices[0].message
                     assistant_response = follow_up_message.content or "Task completed."
@@ -187,6 +300,7 @@ class ConversationManager:
             return assistant_response
             
         except Exception as e:
+            # Handle all errors at this level - don't re-raise tool errors
             logger.error(f"Error in chat completion: {e}")
             return "I encountered an error processing your request. Please try again."
     
@@ -224,6 +338,7 @@ class ConversationManager:
                 try:
                     # Only record in listening mode
                     if self.state.get_mode() != AssistantMode.LISTENING:
+                        logger.debug(f"Not listening, current mode: {self.state.get_mode()}")
                         await asyncio.sleep(0.1)
                         continue
                     
@@ -270,6 +385,15 @@ class ConversationManager:
                         self.state.set_mode(AssistantMode.LISTENING)
                         
                 except Exception as e:
+                    # Don't catch tool execution errors - let them bubble up to failover
+                    if "Tool execution failed:" in str(e):
+                        logger.info(f"Tool error bubbling up - this should not happen, failover should handle it")
+                        self.state.set_mode(AssistantMode.ERROR)
+                        await asyncio.sleep(self.config.reconnect_delay)
+                        self.state.set_mode(AssistantMode.LISTENING)
+                        continue
+                    
+                    # Handle other conversation-level errors
                     logger.error(f"Error in conversation loop: {e}")
                     self.state.set_mode(AssistantMode.ERROR)
                     await asyncio.sleep(self.config.reconnect_delay)

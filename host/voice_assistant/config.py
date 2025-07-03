@@ -81,7 +81,7 @@ class Config:
     chunk_duration: float = 0.1
     wake_phrase_timeout: float = 5.0
 
-    local_chat_model: str      = "mistral-small:22b-instruct-2409-q4_0"
+    local_chat_model: str      = "llama3.1:8b-instruct-q4_0"
     frontier_chat_model: str   = "gpt-4o"
     local_chat_timeout: float  = 30.0
     ollama_host: str           = "http://localhost:11434"
@@ -113,8 +113,8 @@ class Config:
             pyttsx3_rate=int(os.getenv("PYTTSX3_RATE", "150")),
 
             # Ollama configuration -- todo: fix these 
-            local_chat_model   = os.getenv("LOCAL_CHAT_MODEL", "mistral-small:22b-instruct-2409-q4_0"),
-            frontier_chat_model = os.getenv("FRONTIER_CHAT_MODEL", "o3"),
+            local_chat_model   = os.getenv("LOCAL_CHAT_MODEL", "llama3.1:8b-instruct-q4_0"),
+            frontier_chat_model = os.getenv("FRONTIER_CHAT_MODEL", "gpt-4o"),
             local_chat_timeout = int(os.getenv("LOCAL_CHAT_TIMEOUT", "30")),
             ollama_host        = os.getenv("OLLAMA_HOST", "http://localhost:11434"),
             

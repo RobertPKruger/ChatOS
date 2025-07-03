@@ -127,7 +127,7 @@ async def call_tool_with_timeout(mcp_client: Client, call, timeout: float) -> st
     except json.JSONDecodeError as e:
         error_msg = f"Invalid JSON in tool arguments: {e}"
         logger.error(error_msg)
-        return error_msg
+        raise Exception(error_msg)  # Changed: Raise exception instead of returning
     
     logger.info(f"Calling tool: {name} with args: {args}")
     
@@ -157,17 +157,49 @@ async def call_tool_with_timeout(mcp_client: Client, call, timeout: float) -> st
         except Exception as e:
             error_msg = f"Tool {name} failed: {str(e)}"
             logger.error(error_msg)
-            return error_msg
+            raise Exception(error_msg)  # Changed: Raise exception instead of returning
     
     try:
         # Execute with timeout
         result = await asyncio.wait_for(execute_tool(), timeout=timeout)
+        
+        # NEW: Check if the result indicates failure
+        result_lower = result.lower()
+        
+        # Define failure indicators from your MCP server
+        failure_indicators = [
+            "not found",
+            "failed to launch",
+            "application not found", 
+            "path not found",
+            "errors:",
+            "did you mean:",
+            "use 'list_apps' to see",
+            "no apps found",
+            "only .exe files are allowed",
+            "path not in allowed directories",
+            "executable not found",
+            "invalid json",
+            "permission denied",
+            "access denied",
+            "file not found",
+            "command not found"
+        ]
+        
+        # Check if result contains any failure indicators
+        if any(indicator in result_lower for indicator in failure_indicators):
+            error_msg = f"Tool {name} failed: {result}"
+            logger.error(error_msg)
+            raise Exception(error_msg)  # This will trigger failover
+        
+        # Success case
         logger.info(f"Tool {name} completed successfully")
         return result
+        
     except asyncio.TimeoutError:
         error_msg = f"Tool {name} timed out after {timeout}s"
         logger.error(error_msg)
-        return error_msg
+        raise Exception(error_msg)  # Changed: Raise exception instead of returning
 
 async def shutdown_mcp_server(state: AssistantState):
     """Properly shut down MCP server"""
