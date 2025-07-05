@@ -34,61 +34,49 @@ def check_cli_mode():
     return os.getenv("CHATOS_CLI_MODE", "false").lower() in ["true", "1", "yes", "on"]
 
 def initialize_providers(config: Config, state: AssistantState):
-    """Initialize model providers based on configuration"""
+    """Initialize model providers with local-first option"""
     try:
-        # 1. Build the primary (via Ollama)
-        primary_chat = ModelProviderFactory.create_chat_provider(
-            provider_type="ollama",
-            model=config.local_chat_model,          
-            host=config.ollama_host
-        )
-
-        # 2. Build the backup (OpenAI)
-        backup_chat = ModelProviderFactory.create_chat_provider(
-            provider_type="openai",
-            api_key=config.openai_api_key,
-            model=config.frontier_chat_model
-        )
-
-        # 3. Wrap them
-        state.chat_provider = FailoverChatProvider(
-            primary=primary_chat,
-            backup=backup_chat,
-            timeout=config.local_chat_timeout or 30
-        )
-
-        logger.info("Chat provider: local-first with frontier fallback")
-
-        logger.info(
-            f"Configuration: STT={config.stt_model}, "
-            f"Chat={config.local_chat_model} (+fallback {config.frontier_chat_model}), "
-            f"TTS={config.tts_model}"
-        )
-
-        # Create transcription and TTS providers only for voice mode
-        if not check_cli_mode():
-            # Create transcription provider
-            state.transcription_provider = ModelProviderFactory.create_transcription_provider(
-                provider_type=config.transcription_provider,
-                api_key=config.openai_api_key,
-                model=config.stt_model
-            )
-            logger.info(f"Initialized transcription provider: {config.transcription_provider}")
-            
-            # Create TTS provider
-            state.tts_provider = ModelProviderFactory.create_tts_provider(
-                provider_type=config.tts_provider,
-                api_key=config.openai_api_key,
-                model=config.tts_model,
-                voice=config.tts_voice
-            )
-            logger.info(f"Initialized TTS provider: {config.tts_provider}")
+        from voice_assistant.model_providers.factory import ModelProviderFactory
+        from voice_assistant.model_providers.failover_chat import FailoverChatProvider
         
-        # For backward compatibility, also set openai_client if using OpenAI
-        if config.transcription_provider == "openai" or config.chat_provider == "openai" or config.tts_provider == "openai":
-            from openai import OpenAI
-            state.openai_client = OpenAI(api_key=config.openai_api_key)
+        logger.info("🔧 Initializing providers...")
+        
+        if config.use_local_first:
+            # Local-first mode: Ollama primary, OpenAI fallback
+            logger.info("Using local-first mode")
             
+            primary_chat = ModelProviderFactory.create_chat_provider(
+                provider_type="ollama",
+                model=config.local_chat_model,
+                host=config.ollama_host
+            )
+
+            backup_chat = ModelProviderFactory.create_chat_provider(
+                provider_type="openai",
+                api_key=config.openai_api_key,
+                model=config.frontier_chat_model
+            )
+
+            state.chat_provider = FailoverChatProvider(
+                primary=primary_chat,
+                backup=backup_chat,
+                timeout=config.local_chat_timeout or 30
+            )
+            
+            logger.info("✅ Chat provider: local-first with frontier fallback")
+            
+        else:
+            # Cloud-only mode: OpenAI only
+            logger.info("Using cloud-only mode")
+            
+            state.chat_provider = ModelProviderFactory.create_chat_provider(
+                provider_type="openai",
+                api_key=config.openai_api_key,
+                model=config.frontier_chat_model
+            )
+            
+            logger.info("✅ Chat provider: OpenAI only")
+        
     except Exception as e:
         logger.error(f"Failed to initialize providers: {e}")
         raise

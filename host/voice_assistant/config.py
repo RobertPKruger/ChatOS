@@ -23,6 +23,8 @@ class Config:
     chat_fallback: Optional[str] = None
     tts_provider: str = "openai"  # "openai", "pyttsx3", "hybrid"
     tts_fallback: Optional[str] = None
+
+    use_local_first: bool = True  # Use local models first if available
     
     # OpenAI configuration
 
@@ -97,6 +99,8 @@ class Config:
             chat_fallback=os.getenv("CHAT_FALLBACK"),
             tts_provider=os.getenv("TTS_PROVIDER", "openai"),
             tts_fallback=os.getenv("TTS_FALLBACK"),
+
+            use_local_first = os.getenv("USE_LOCAL_FIRST", "true").lower() in ["true", "1", "yes", "on"],
             
             # OpenAI configuration
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
@@ -105,7 +109,7 @@ class Config:
             tts_model=os.getenv("TTS_MODEL", "tts-1"),
             tts_voice=os.getenv("TTS_VOICE", "nova"),
             
-            # Local model configuration
+            # Local model configurationF
             whisper_model_size=os.getenv("WHISPER_MODEL_SIZE", "base"),
             ollama_base_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
             ollama_model=os.getenv("OLLAMA_MODEL", "mistral"),

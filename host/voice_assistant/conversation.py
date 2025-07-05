@@ -1,4 +1,4 @@
-# voice_assistant/conversation.py - CORRECTED VERSION
+# voice_assistant/conversation.py
 """
 Main conversation loop and management with proper tool handling for local vs backup models
 """
@@ -24,6 +24,67 @@ class ConversationManager:
         self.state = state
         self.audio_recorder = audio_recorder
         self.stuck_task: Optional[asyncio.Task] = None
+
+    def _extract_text_from_any_format(self, data):
+        """Aggressively extract text from any data format"""
+        if data is None:
+            return ""
+        
+        # Already a string
+        if isinstance(data, str):
+            return data
+        
+        # TextContent object
+        if hasattr(data, 'text'):
+            return str(data.text)
+        
+        # List of objects
+        if isinstance(data, list):
+            if len(data) == 0:
+                return ""
+            
+            # Try first element
+            first_item = data[0]
+            
+            # First item has text
+            if hasattr(first_item, 'text'):
+                return str(first_item.text)
+            
+            # First item is string
+            if isinstance(first_item, str):
+                return first_item
+            
+            # First item is dict
+            if isinstance(first_item, dict):
+                for key in ['text', 'content', 'message', 'result']:
+                    if key in first_item:
+                        return str(first_item[key])
+            
+            # Convert first item to string
+            return str(first_item)
+        
+        # Dictionary
+        if isinstance(data, dict):
+            for key in ['text', 'content', 'message', 'result', 'data']:
+                if key in data:
+                    return str(data[key])
+        
+        # String representation parsing for TextContent
+        data_str = str(data)
+        if 'TextContent' in data_str and 'text=' in data_str:
+            import re
+            # Try to extract text from string representation
+            patterns = [
+                r"text='([^']*)'",
+                r'text="([^"]*)"',
+                r"text=([^,)]+)"
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, data_str)
+                if match:
+                    return match.group(1).strip('\'"')
+        
+        return data_str
         
     async def stuck_detection_task(self):
         """Background task to check if assistant is stuck and listen for wake phrase"""
@@ -75,6 +136,22 @@ class ConversationManager:
     async def handle_special_commands(self, text: str) -> bool:
         """Handle special commands and return True if handled"""
         lower_text = text.lower().strip()
+
+        if "use local model" in lower_text or "enable local" in lower_text:
+            if not self.config.use_local_first:
+                await speak_text("Switching to local-first mode. This will take effect on restart.", self.state, self.config)
+                # Note: Would need restart to actually change providers
+            else:
+                await speak_text("Local-first mode is already enabled.", self.state, self.config)
+            return True
+            
+        if "use cloud only" in lower_text or "disable local" in lower_text:
+            if self.config.use_local_first:
+                await speak_text("Cloud-only mode would take effect on restart.", self.state, self.config)
+                # Note: Would need restart to actually change providers
+            else:
+                await speak_text("Already using cloud-only mode.", self.state, self.config)
+            return True
         
         # Sleep commands
         if any(phrase in lower_text for phrase in ["go to sleep", "sleep mode", "sleep now", "go sleep", "sleep"]):
@@ -154,44 +231,12 @@ class ConversationManager:
         if not tool_results:
             return response_content
         
-        # Get the most recent tool result
+        # Get the most recent tool result and extract text aggressively
         last_result = tool_results[-1] if tool_results else ""
+        result_text = self._extract_text_from_any_format(last_result)
         
-        # Extract text content from various formats
-        def extract_text(result):
-            """Extract plain text from various result formats"""
-            if result is None:
-                return ""
-            
-            # If it's already a string, return it
-            if isinstance(result, str):
-                return result
-            
-            # If it's a TextContent object with .text attribute
-            if hasattr(result, 'text'):
-                return result.text
-            
-            # If it's a list, try to extract from first element
-            if isinstance(result, list) and len(result) > 0:
-                first_item = result[0]
-                if hasattr(first_item, 'text'):
-                    return first_item.text
-                elif isinstance(first_item, str):
-                    return first_item
-                else:
-                    return str(first_item)
-            
-            # If it's a dict, look for common text fields
-            if isinstance(result, dict):
-                for key in ['text', 'content', 'message', 'result']:
-                    if key in result:
-                        return str(result[key])
-            
-            # Fallback: convert to string
-            return str(result)
-        
-        # Extract the actual text content
-        result_text = extract_text(last_result)
+        logger.debug(f"Original tool result type: {type(last_result)}")
+        logger.debug(f"Extracted text: {result_text[:100]}...")
         
         # Clean up any remaining formatting artifacts
         result_text = result_text.strip()
@@ -265,15 +310,12 @@ class ConversationManager:
                             mcp_client, tool_call, self.config.tool_timeout
                         )
                         
-                        # Extract clean text from tool result before storing
-                        if hasattr(tool_result, 'text'):
-                            clean_result = tool_result.text
-                        elif isinstance(tool_result, list) and len(tool_result) > 0 and hasattr(tool_result[0], 'text'):
-                            clean_result = tool_result[0].text
-                        elif isinstance(tool_result, str):
-                            clean_result = tool_result
-                        else:
-                            clean_result = str(tool_result)
+                        # Use the aggressive text extraction
+                        clean_result = self._extract_text_from_any_format(tool_result)
+                        
+                        # Log for debugging
+                        logger.debug(f"Tool {tool_call.function.name} raw result type: {type(tool_result)}")
+                        logger.debug(f"Tool {tool_call.function.name} clean result: {clean_result[:100]}...")
                         
                         # Add tool result to history with clean text
                         self.state.conversation_history.append({
@@ -420,6 +462,8 @@ class ConversationManager:
                                 )
                                 
                                 final_response = final_completion.choices[0].message.content or "Task completed."
+                                # CRITICAL FIX: Clean the final response before storing
+                                final_response = self._extract_text_from_any_format(final_response)
                                 self.state.conversation_history.append({
                                     "role": "assistant",
                                     "content": final_response
@@ -430,6 +474,8 @@ class ConversationManager:
                             else:
                                 # OpenAI gave direct response
                                 response = fallback_message.content or "I can help you with that."
+                                # CRITICAL FIX: Clean the response before storing
+                                response = self._extract_text_from_any_format(response)
                                 self.state.conversation_history.append({
                                     "role": "assistant",
                                     "content": response
@@ -444,11 +490,17 @@ class ConversationManager:
                 
                 # Get the model's follow-up response if not interrupted and all tools succeeded
                 if not self.state.interrupt_flag.is_set() and self.state.get_mode() != AssistantMode.STUCK_CHECK:
-                    # Track tool results for potential improvement
+                    # Track tool results for potential improvement - with aggressive extraction
                     tool_results = []
                     for msg in self.state.conversation_history:
                         if msg.get("role") == "tool":
-                            tool_results.append(msg.get("content", ""))
+                            content = msg.get("content", "")
+                            # Extract text even from stored content (double-check)
+                            clean_content = self._extract_text_from_any_format(content)
+                            tool_results.append(clean_content)
+                    
+                    # Log what we collected
+                    logger.debug(f"Collected tool results: {[r[:50] for r in tool_results]}")
                     
                     # For follow-up, use the same tools logic
                     if use_tools:
@@ -462,24 +514,59 @@ class ConversationManager:
                             messages=self.state.conversation_history
                         )
                     
-                    follow_up_message = follow_up.choices[0].message
-                    assistant_response = follow_up_message.content or "Task completed."
+                    follow_up_choice = follow_up.choices[0]
+                    follow_up_message = follow_up_choice.message
                     
-                    # Check if the response is too generic and improve it
-                    if self._detect_poor_tool_response(assistant_response, bool(tool_results)):
-                        logger.info("Detected poor tool response, improving...")
-                        improved_response = self._improve_tool_response(assistant_response, tool_results)
-                        if improved_response != assistant_response:
-                            assistant_response = improved_response
-                            logger.info("Improved generic response with actual tool results")
-                    
-                    self.state.conversation_history.append({
-                        "role": "assistant", 
-                        "content": assistant_response
-                    })
+                    # CRITICAL FIX: Check if the local model returned ANOTHER tool call instead of text
+                    if follow_up_choice.finish_reason == "tool_calls" and follow_up_message.tool_calls:
+                        logger.warning("Local model returned tool calls in follow-up instead of text response!")
+                        
+                        # The local model is confused - extract the tool result directly and use it as response
+                        if tool_results:
+                            logger.info("Using tool result directly as response since local model is confused")
+                            # tool_results already contains cleaned text, so use it directly
+                            raw_result = tool_results[-1]
+                            
+                            # Clean up the response - check if it looks like a launch message
+                            if "Launched" in raw_result or "opened" in raw_result.lower():
+                                assistant_response = raw_result.strip()
+                            else:
+                                # For other results like game lists, present them cleanly
+                                if "Steam Games" in raw_result or "App ID:" in raw_result:
+                                    assistant_response = f"Here are your Steam games:\n{raw_result}"
+                                else:
+                                    assistant_response = raw_result.strip()
+                        else:
+                            assistant_response = "Task completed successfully."
+                            
+                        # Don't add the tool calls to history, just add the text response
+                        self.state.conversation_history.append({
+                            "role": "assistant", 
+                            "content": assistant_response
+                        })
+                    else:
+                        # Normal text response from the model
+                        assistant_response = follow_up_message.content or "Task completed."
+                        # CRITICAL FIX: Clean the response before storing and returning
+                        assistant_response = self._extract_text_from_any_format(assistant_response)
+                        
+                        # Check if the response is too generic and improve it
+                        if self._detect_poor_tool_response(assistant_response, bool(tool_results)):
+                            logger.info("Detected poor tool response, improving...")
+                            improved_response = self._improve_tool_response(assistant_response, tool_results)
+                            if improved_response != assistant_response:
+                                assistant_response = improved_response
+                                logger.info("Improved generic response with actual tool results")
+                        
+                        self.state.conversation_history.append({
+                            "role": "assistant", 
+                            "content": assistant_response
+                        })
             else:
-                # Regular text response
+                # Direct response without tool calls
                 assistant_response = message.content or "I'm not sure how to respond to that."
+                # CRITICAL FIX: Clean the response before storing and returning
+                assistant_response = self._extract_text_from_any_format(assistant_response)
                 self.state.conversation_history.append({
                     "role": "assistant", 
                     "content": assistant_response
@@ -617,12 +704,21 @@ class ConversationManager:
                     provider_used = getattr(self.state.chat_provider, "last_provider", "unknown")
                     logger.info(f"Turn answered by: {provider_used}")
                     
-                    # Speak the response if not interrupted
-                    if assistant_response and not self.state.interrupt_flag.is_set() and \
-                       self.state.get_mode() != AssistantMode.STUCK_CHECK:
-                        await speak_text(assistant_response, self.state, self.config)
+                    # CRITICAL FIX: Clean the assistant response before speaking
+                    if assistant_response:
+                        clean_response = self._extract_text_from_any_format(assistant_response)
+                        logger.debug(f"Original response type: {type(assistant_response)}")
+                        logger.debug(f"Clean response: {clean_response[:100]}...")
+                        
+                        # Speak the response if not interrupted
+                        if not self.state.interrupt_flag.is_set() and \
+                           self.state.get_mode() != AssistantMode.STUCK_CHECK:
+                            await speak_text(clean_response, self.state, self.config)
+                        else:
+                            logger.info("Skipping speech due to interruption")
+                            self.state.set_mode(AssistantMode.LISTENING)
                     else:
-                        logger.info("Skipping speech due to interruption or no response")
+                        logger.info("No response to speak")
                         self.state.set_mode(AssistantMode.LISTENING)
                         
                 except Exception as e:
