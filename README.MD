@@ -53,3 +53,34 @@ pip install -r requirements/server.txt
 deactivate
 
 3. You can switch into the environments and launch the server and host with run.bat.
+
+4. For the local model, you will want to install ollama:
+
+# One-time per machine
+brew install ollama            # or the installer/script
+ollama serve &                 # or start the GUI app
+
+# Per project
+pip install ollama             # Python wrapper
+ollama pull mistral            # download a model
+
+
+Test file:
+
+# my_code.py
+import ollama
+
+def main():
+    # Make sure the Ollama server is running on localhost:11434
+    reply = ollama.generate(
+        model='mistral',           # any model you have pulled
+        prompt='Summarize the Prisoner’s Dilemma in 100 words'
+    )
+    print(reply['response'])       # prints the text returned by the model
+
+if __name__ == "__main__":
+    main()
+
+
+
+python my_code.py              # code calls localhost:11434

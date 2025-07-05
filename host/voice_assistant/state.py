@@ -62,6 +62,7 @@ class AssistantMode(Enum):
     SPEAKING = "speaking"            # Playing TTS response
     STUCK_CHECK = "stuck_check"      # Listening only for wake phrase
     ERROR = "error"                  # Error state
+    SLEEPING = "sleeping"         # In sleep mode, not listening
 
 class AssistantState:
     """Global state management for the assistant"""

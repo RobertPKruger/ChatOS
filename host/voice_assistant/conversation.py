@@ -1,4 +1,4 @@
-# voice_assistant/conversation.py - MINIMAL FIX VERSION
+# voice_assistant/conversation.py - CORRECTED VERSION
 """
 Main conversation loop and management with proper tool handling for local vs backup models
 """
@@ -71,11 +71,31 @@ class ConversationManager:
             except Exception as e:
                 logger.error(f"Error in stuck detection task: {e}")
                 await asyncio.sleep(1)
-    
+
     async def handle_special_commands(self, text: str) -> bool:
         """Handle special commands and return True if handled"""
         lower_text = text.lower().strip()
         
+        # Sleep commands
+        if any(phrase in lower_text for phrase in ["go to sleep", "sleep mode", "sleep now", "go sleep", "sleep"]):
+            await speak_text("Going to sleep. Say 'wake up' or 'hello' to wake me.", self.state, self.config)
+            self.state.set_mode(AssistantMode.SLEEPING)
+            logger.info("System entering sleep mode")
+            return True
+        
+        # Wake commands (only processed when sleeping)
+        if self.state.get_mode() == AssistantMode.SLEEPING:
+            if any(phrase in lower_text for phrase in ["wake up", "wake", "hello", "hey", "wake me up"]):
+                self.state.set_mode(AssistantMode.LISTENING)
+                await speak_text("I'm awake! How can I help you?", self.state, self.config)
+                logger.info("System waking up from sleep mode")
+                return True
+            else:
+                # In sleep mode, ignore all other commands
+                logger.debug(f"Ignoring command while sleeping: {text}")
+                return True
+        
+        # Existing commands (only when not sleeping)
         if lower_text in {"reset chat", "new chat", "clear history"}:
             self.state.reset_conversation()
             await speak_text("Starting a new conversation.", self.state, self.config)
@@ -471,9 +491,9 @@ class ConversationManager:
             # Handle all errors at this level - don't re-raise tool errors
             logger.error(f"Error in chat completion: {e}")
             return "I encountered an error processing your request. Please try again."
-    
+
     async def conversation_loop(self):
-        """Main conversation loop with improved state management"""
+        """Main conversation loop with sleep/wake functionality"""
         logger.info("Starting conversation loop with mode-aware listening")
         
         # Initialize conversation
@@ -500,17 +520,69 @@ class ConversationManager:
             tools = await get_tools(mcp_client, self.state)
             
             # Initial greeting
-            await speak_text("Hello! I'm listening.", self.state, self.config)
+            await speak_text("Hello! I'm listening. You can say 'go to sleep' to put me in sleep mode.", self.state, self.config)
             
             while self.state.running:
                 try:
-                    # Only record in listening mode
-                    if self.state.get_mode() != AssistantMode.LISTENING:
-                        logger.debug(f"Not listening, current mode: {self.state.get_mode()}")
+                    current_mode = self.state.get_mode()
+                    
+                    # Handle sleep mode - keep listening but only process wake commands
+                    if current_mode == AssistantMode.SLEEPING:
+                        logger.debug("In sleep mode, listening for wake commands only")
+                        
+                        # IMPORTANT: Stay in LISTENING mode for audio system, but track sleep state separately
+                        # The audio system needs to think we're listening to keep capturing audio
+                        if self.state.get_mode() == AssistantMode.SLEEPING:
+                            # Temporarily set to LISTENING for audio capture
+                            self.state.set_mode(AssistantMode.LISTENING)
+                        
+                        # Record audio (this will work now that we're in LISTENING mode)
+                        audio_buffer = await self.audio_recorder.record_until_silence(
+                            self.state, self.config
+                        )
+                        
+                        # Immediately set back to SLEEPING
+                        self.state.set_mode(AssistantMode.SLEEPING)
+                        
+                        if not audio_buffer:
+                            await asyncio.sleep(0.5)
+                            continue
+                        
+                        # Process for wake commands only
+                        try:
+                            # Use transcribe_audio with bypass validation
+                            user_text = await transcribe_audio(audio_buffer, self.state, self.config, check_stuck_phrase=True)
+                            
+                            if user_text:
+                                logger.info(f"Sleep mode heard: '{user_text}'")
+                                
+                                # Check for wake commands
+                                lower_text = user_text.lower().strip()
+                                wake_words = ["wake", "hello", "hey", "up", "wake up"]
+                                
+                                if any(word in lower_text for word in wake_words):
+                                    logger.info("Wake command detected! Waking up...")
+                                    self.state.set_mode(AssistantMode.LISTENING)
+                                    await speak_text("I'm awake! How can I help you?", self.state, self.config)
+                                    continue
+                                else:
+                                    logger.debug(f"Not a wake command, staying asleep: '{user_text}'")
+                            else:
+                                logger.debug("No valid transcription in sleep mode")
+                                
+                        except Exception as transcribe_error:
+                            logger.debug(f"Transcription error in sleep mode: {transcribe_error}")
+                        
+                        # Stay in sleep mode
+                        continue
+                    
+                    # Normal operation - only process when in listening mode
+                    elif current_mode != AssistantMode.LISTENING:
+                        logger.debug(f"Not listening, current mode: {current_mode}")
                         await asyncio.sleep(0.1)
                         continue
                     
-                    # Record audio until silence
+                    # Record audio until silence (normal mode)
                     audio_buffer = await self.audio_recorder.record_until_silence(
                         self.state, self.config
                     )
@@ -521,7 +593,7 @@ class ConversationManager:
                     # Switch to recording mode
                     self.state.set_mode(AssistantMode.RECORDING)
                     
-                    # Transcribe
+                    # Transcribe with normal validation
                     user_text = await transcribe_audio(audio_buffer, self.state, self.config)
                     if not user_text:
                         self.state.set_mode(AssistantMode.LISTENING)
@@ -529,14 +601,15 @@ class ConversationManager:
                     
                     logger.info(f"User said: {user_text}")
                     
-                    # Switch to processing mode
-                    self.state.set_mode(AssistantMode.PROCESSING)
-                    
-                    # Handle special commands
+                    # Handle special commands first (including sleep)
                     if await self.handle_special_commands(user_text):
                         if not self.state.running:  # Exit was called
                             break
+                        # If we just went to sleep, continue to sleep mode handling
                         continue
+                    
+                    # Switch to processing mode for normal commands
+                    self.state.set_mode(AssistantMode.PROCESSING)
                     
                     # Process user input
                     assistant_response = await self.process_user_input(user_text, mcp_client, tools)
@@ -575,7 +648,7 @@ class ConversationManager:
                 await self.stuck_task
             except asyncio.CancelledError:
                 pass
-    
+
     async def shutdown_system(self):
         """Properly shut down both server and client"""
         logger.info("Initiating system shutdown...")
