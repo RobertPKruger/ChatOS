@@ -245,11 +245,21 @@ class ConversationManager:
                             mcp_client, tool_call, self.config.tool_timeout
                         )
                         
-                        # Add tool result to history
+                        # Extract clean text from tool result before storing
+                        if hasattr(tool_result, 'text'):
+                            clean_result = tool_result.text
+                        elif isinstance(tool_result, list) and len(tool_result) > 0 and hasattr(tool_result[0], 'text'):
+                            clean_result = tool_result[0].text
+                        elif isinstance(tool_result, str):
+                            clean_result = tool_result
+                        else:
+                            clean_result = str(tool_result)
+                        
+                        # Add tool result to history with clean text
                         self.state.conversation_history.append({
                             "role": "tool",
                             "tool_call_id": tool_call.id,
-                            "content": tool_result
+                            "content": clean_result  # Store clean text instead of raw object
                         })
                         
                     except Exception as tool_error:
