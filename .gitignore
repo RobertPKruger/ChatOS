@@ -1,8 +1,8 @@
 .env
 *.log
 
+# Python bytecode
 __pycache__/
-*.pyc
+*.py[cod]
 *$py.class
 host/voice_assistant/__pycache__/
-
