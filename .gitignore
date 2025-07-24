@@ -1,1 +1,8 @@
-voice_assistant.log
+.env
+*.log
+
+__pycache__/
+*.pyc
+*$py.class
+host/voice_assistant/__pycache__/
+

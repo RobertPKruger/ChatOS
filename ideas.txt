@@ -1,2 +1,28 @@
-1. Add a local model to speed up chat.
-2. Add a SQL-database app to store server profiles and have the chatbot update records on command.
+Create different install branches for Mac and Windows.
+
+Improve voice responsiveness and discrimination: create a callback for after the user text is transcribed, the model answers with text, and the synthesis ends. Have the attention of the chatbot close off after a period of inactivity, and have the active flag reset when "Hello, Abraxas" is spoken.
+
+Host a local Llama model for local servers:
+Branch from the local to the full frontier model if the listener determines that the query does not involve a request to perform local operations or errors in trying to do so?
+
+Have local model handle text interpretation, at least in sleep mode: replace the OpenAI STT/TTS with local alternatives like whisper.cpp and espeak/festival.
+
+Create a "memory" of the chat for the frontier model using a local db, and then send that memory off to the frontier model. A memory module works with the frontier model to keep the query within a certain size. It must periodically summarize.
+
+Use that memory on both client and server so that both are aware of the working context.
+
+Fix transport errors in local model.
+
+
+See if there's a way to discriminate the primary speaker's voice. 
+
+
+Create a RAG for targeted data.
+
+Custom voice synthesis.
+
+Add a SQL database application to store server profiles. Create a loop so that the system can store things it learns from user interaction (app aliases, etc.)
+
+Install packages.
+
+Create a multi-user websockets server so many people can interact at once, either via tty or voice.
