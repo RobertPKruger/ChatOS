@@ -1,4 +1,4 @@
-# voice_assistant/config.py - FIXED VERSION
+# voice_assistant/config.py - CLEANED VERSION
 """
 Configuration management for the voice assistant
 """
@@ -16,99 +16,91 @@ load_dotenv()
 @dataclass
 class Config:
     """Configuration settings for the voice assistant"""
-    # Model provider configuration
-    transcription_provider: str = "openai"  # "openai", "local_whisper", "hybrid"
-    chat_provider: str = "openai"  # "openai", "ollama", "hybrid"
-    tts_provider: str = "openai"  # "openai", "pyttsx3", "hybrid"
-
-    use_local_first: bool = True  # Use local models first if available
+    # === CORE SETTINGS ===
+    use_local_first: bool
     
-    # OpenAI configuration
-    openai_api_key: str = ""
-    stt_model: str = "gpt-4o-transcribe"
-    tts_model: str = "tts-1"
-    tts_voice: str = "nova"
+    # === API KEYS ===
+    openai_api_key: str
     
-    # Local model configuration
-    whisper_model_size: str = "base"
-    ollama_model: str = "mistral"
-    pyttsx3_voice_id: Optional[str] = None
-    pyttsx3_rate: int = 150
+    # === MODEL CONFIGURATION ===
+    # Transcription
+    stt_model: str
     
-    # Hybrid configuration
-    use_primary_for_tools: bool = True  # Always use OpenAI for tool calls
+    # Chat Models
+    local_chat_model: str
+    frontier_chat_model: str
+    local_chat_timeout: float
     
-    # Audio configuration
-    sample_rate: int = 16000
-    min_audio_size: int = 10000
-    silence_threshold: float = 0.03
-    silence_duration: float = 1.5
-    min_speech_duration: float = 0.8
-    energy_threshold_multiplier: float = 2.0
-    max_energy_threshold: float = 0.5
+    # TTS
+    tts_model: str
+    tts_voice: str
     
-    # Processing configuration
-    tool_timeout: float = 30.0
-    processing_timeout: float = 60.0  # Maximum time for full processing cycle
-    stuck_phrase: str = "hello abraxas are you stuck"  # Wake phrase (normalized)
-    stuck_check_interval: float = 5.0  # How often to check for stuck state
+    # === LOCAL MODEL CONFIGURATION ===
+    whisper_model_size: str
+    ollama_host: str
+    pyttsx3_rate: int
     
-    # Retry and connection configuration
-    reconnect_delay: float = 2.0
-    max_retries: int = 3
-    retry_delay: float = 1.0
+    # === AUDIO CONFIGURATION ===
+    sample_rate: int
+    min_audio_size: int
+    silence_threshold: float
+    silence_duration: float
+    min_speech_duration: float
+    energy_threshold_multiplier: float
+    max_energy_threshold: float
     
-    # Logging configuration
-    log_level: str = "INFO"
-    log_file: str = "voice_assistant.log"
+    # === PROCESSING CONFIGURATION ===
+    tool_timeout: float
+    processing_timeout: float
+    stuck_phrase: str
+    stuck_check_interval: float
     
-    # VAD configuration
-    enable_vad: bool = True
-    vad_aggressiveness: int = 3
+    # === SYSTEM CONFIGURATION ===
+    reconnect_delay: float
+    max_retries: int
+    retry_delay: float
     
-    # Validation configuration
-    min_confidence_length: int = 2
-    english_confidence_threshold: float = 0.7
-
-
-    # NEW FIELDS - Add these to match your from_env() method
-    local_chat_model: str = "llama3.1:8b-instruct-q4_0"
-    frontier_chat_model: str = "gpt-4o"
-    local_chat_timeout: float = 30.0
-    ollama_host: str = "http://localhost:11434"
+    # === LOGGING CONFIGURATION ===
+    log_level: str
+    log_file: str
+    
+    # === VAD CONFIGURATION ===
+    enable_vad: bool
+    vad_aggressiveness: int
+    
+    # === VALIDATION CONFIGURATION ===
+    min_confidence_length: int
+    english_confidence_threshold: float
     
     @classmethod
     def from_env(cls) -> "Config":
         """Load configuration from environment variables"""
         return cls(
-            # Model provider configuration
-            chat_provider=os.getenv("CHAT_PROVIDER", "openai"),
-            tts_provider=os.getenv("TTS_PROVIDER", "openai"),
-
-            use_local_first = os.getenv("USE_LOCAL_FIRST", "true").lower() in ["true", "1", "yes", "on"],
+            # === CORE SETTINGS ===
+            use_local_first=os.getenv("USE_LOCAL_FIRST", "true").lower() in ["true", "1", "yes", "on"],
             
-            # OpenAI configuration
+            # === API KEYS ===
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
-            stt_model=os.getenv("STT_MODEL", "gpt-4o-transcribe"),
-            tts_model=os.getenv("TTS_MODEL", "tts-1"),
-            tts_voice=os.getenv("TTS_VOICE", "nova"),
             
-            # Local model configuration
-            whisper_model_size=os.getenv("WHISPER_MODEL_SIZE", "base"),
-            ollama_model=os.getenv("OLLAMA_MODEL", "mistral"),
-            pyttsx3_voice_id=os.getenv("PYTTSX3_VOICE_ID"),
-            pyttsx3_rate=int(os.getenv("PYTTSX3_RATE", "150")),
-
-
+            # === MODEL CONFIGURATION ===
+            # Transcription
+            stt_model=os.getenv("STT_MODEL", "gpt-4o-transcribe"),
+            
+            # Chat Models
             local_chat_model=os.getenv("LOCAL_CHAT_MODEL", "llama3.1:8b-instruct-q4_0"),
             frontier_chat_model=os.getenv("FRONTIER_CHAT_MODEL", "gpt-4o"),
             local_chat_timeout=float(os.getenv("LOCAL_CHAT_TIMEOUT", "30")),
+            
+            # TTS
+            tts_model=os.getenv("TTS_MODEL", "tts-1"),
+            tts_voice=os.getenv("TTS_VOICE", "nova"),
+            
+            # === LOCAL MODEL CONFIGURATION ===
+            whisper_model_size=os.getenv("WHISPER_MODEL_SIZE", "base"),
             ollama_host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+            pyttsx3_rate=int(os.getenv("PYTTSX3_RATE", "150")),
             
-            # Hybrid configuration
-            use_primary_for_tools=os.getenv("USE_PRIMARY_FOR_TOOLS", "true").lower() == "true",
-            
-            # Audio configuration
+            # === AUDIO CONFIGURATION ===
             sample_rate=int(os.getenv("SAMPLE_RATE", "16000")),
             min_audio_size=int(os.getenv("MIN_AUDIO_SIZE", "10000")),
             silence_threshold=float(os.getenv("SILENCE_THRESHOLD", "0.03")),
@@ -117,51 +109,70 @@ class Config:
             energy_threshold_multiplier=float(os.getenv("ENERGY_THRESHOLD_MULTIPLIER", "2.0")),
             max_energy_threshold=float(os.getenv("MAX_ENERGY_THRESHOLD", "0.5")),
             
-            # Processing configuration
+            # === PROCESSING CONFIGURATION ===
             tool_timeout=float(os.getenv("TOOL_TIMEOUT", "30.0")),
             processing_timeout=float(os.getenv("PROCESSING_TIMEOUT", "60.0")),
             stuck_phrase=os.getenv("STUCK_PHRASE", "hello abraxas are you stuck").lower().replace(",", "").replace("?", ""),
             stuck_check_interval=float(os.getenv("STUCK_CHECK_INTERVAL", "5.0")),
             
-            # Retry and connection configuration
+            # === SYSTEM CONFIGURATION ===
             reconnect_delay=float(os.getenv("RECONNECT_DELAY", "2.0")),
             max_retries=int(os.getenv("MAX_RETRIES", "3")),
             retry_delay=float(os.getenv("RETRY_DELAY", "1.0")),
             
-            # Logging configuration
+            # === LOGGING CONFIGURATION ===
             log_level=os.getenv("LOG_LEVEL", "INFO"),
             log_file=os.getenv("LOG_FILE", "voice_assistant.log"),
             
-            # VAD configuration
+            # === VAD CONFIGURATION ===
             enable_vad=os.getenv("ENABLE_VAD", "true").lower() == "true",
             vad_aggressiveness=int(os.getenv("VAD_AGGRESSIVENESS", "3")),
             
-            # Validation configuration
+            # === VALIDATION CONFIGURATION ===
             min_confidence_length=int(os.getenv("MIN_CONFIDENCE_LENGTH", "3")),
             english_confidence_threshold=float(os.getenv("ENGLISH_CONFIDENCE_THRESHOLD", "0.7")),
         )
 
 def setup_logging(config: Config):
     """Configure logging with rotation and proper formatting"""
+    # Check if we should force console output (when launched via launcher)
+    force_console = os.getenv("CHATOS_CONSOLE_OUTPUT") == "1"
+    
     # Create handlers with UTF-8 encoding
     file_handler = logging.FileHandler(config.log_file, encoding='utf-8')
     
-    # For console output on Windows, use UTF-8 encoding
+    handlers = [file_handler]
+    
+    # Always add console handler, but configure it properly
     console_handler = logging.StreamHandler(sys.stdout)
     if sys.platform == "win32":
         # Set console to UTF-8 mode on Windows
         import locale
         import codecs
         if sys.stdout.encoding != 'utf-8':
-            sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+            try:
+                sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
+            except AttributeError:
+                pass  # Already wrapped or not available
         if sys.stderr.encoding != 'utf-8':
-            sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+            try:
+                sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
+            except AttributeError:
+                pass  # Already wrapped or not available
+    
+    handlers.append(console_handler)
     
     # Configure logging
+    log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    if force_console:
+        # Simpler format for console output via launcher
+        log_format = '%(name)s - %(levelname)s - %(message)s'
+    
     logging.basicConfig(
         level=getattr(logging, config.log_level.upper()),
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[file_handler, console_handler]
+        format=log_format,
+        handlers=handlers,
+        force=True  # Reconfigure even if already configured
     )
     
     # Reduce noise from third-party libraries

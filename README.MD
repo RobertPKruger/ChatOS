@@ -1,11 +1,11 @@
 1. Create a .env file within the host directory, and add the following params:
 
 # For very noisy environments
-SILENCE_THRESHOLD=0.05
+SILENCE_THRESHOLD=0.08
 ENERGY_THRESHOLD_MULTIPLIER=2.5
-MIN_SPEECH_DURATION=1.0
+MIN_SPEECH_DURATION=.8
 VAD_AGGRESSIVENESS=3
-MIN_CONFIDENCE_LENGTH=4
+MIN_CONFIDENCE_LENGTH=2
 CHATOS_CLI_MODE=false
 USERNAME='<your name>'
 
