@@ -11,7 +11,23 @@
       "word": ["word", "microsoft word", "winword", "document", "docs"],
       "outlook": ["outlook", "email", "mail", "microsoft outlook"],
       "code": ["code", "vscode", "visual studio code", "vs code", "editor"],
-      "gcai": ["garratt-callahan ai", "garratt callahan ai", "garrattcallahan ai", "garrattcallahan-ai", "garratt-callahan-ai"]
+      "gcai": [
+        "gcai", 
+        "gc ai", 
+        "gc_ai",
+        "g c a i",
+        "garratt-callahan ai", 
+        "garratt callahan ai", 
+        "garrattcallahan ai", 
+        "garrattcallahan-ai", 
+        "garratt-callahan-ai",
+        "gc artificial intelligence",
+        "garratt callahan artificial intelligence",
+        "chat ai",
+        "chatai",
+        "the gc ai",
+        "the gcai"
+      ]
     },
     
     "darwin": {
