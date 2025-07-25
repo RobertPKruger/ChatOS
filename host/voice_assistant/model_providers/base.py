@@ -1,9 +1,10 @@
+# voice_assistant/model_providers/base.py - FIXED
 """
 Base interfaces for model providers
 """
 
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, List, AsyncGenerator
+from typing import Optional, Dict, Any, List
 import io
 
 class TranscriptionProvider(ABC):
@@ -23,28 +24,14 @@ class ChatCompletionProvider(ABC):
     """Base interface for chat completion providers"""
     
     @abstractmethod
-    async def create_completion(
+    def complete(
         self,
         messages: List[Dict[str, Any]],
-        model: str,
         tools: Optional[List[Dict[str, Any]]] = None,
         temperature: float = 0.7,
-        stream: bool = False,
         **kwargs
     ) -> Any:
         """Create a chat completion"""
-        pass
-    
-    @abstractmethod
-    async def create_streaming_completion(
-        self,
-        messages: List[Dict[str, Any]],
-        model: str,
-        tools: Optional[List[Dict[str, Any]]] = None,
-        temperature: float = 0.7,
-        **kwargs
-    ) -> AsyncGenerator[Any, None]:
-        """Create a streaming chat completion"""
         pass
 
 class TextToSpeechProvider(ABC):

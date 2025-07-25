@@ -1,176 +1,184 @@
-# voice_assistant/model_providers/ollama_chat.py - IMPROVED VERSION
+# voice_assistant/model_providers/ollama_chat.py
+"""
+Ollama Chat provider implementation with tool call parsing
+"""
+
 import json
 import logging
 import requests
-from typing import List, Dict, Any
+from typing import Any, Dict, List, Optional
+import time
+
+from .base import ChatCompletionProvider
 
 logger = logging.getLogger(__name__)
 
-class OllamaChatProvider:
-    """
-    Synchronous wrapper for Ollama's REST API with improved error handling.
-    Returns exactly the same object shape as the OpenAI client.
-    """
+class OllamaMessage:
+    """Mock message object for Ollama responses"""
+    def __init__(self, content: str, tool_calls: Optional[List] = None):
+        self.content = content
+        self.tool_calls = tool_calls or []
 
-    class _Choice:
-        def __init__(self, content: str):
-            self.message = type("Msg", (), {
-                "content": content,
-                "role": "assistant"
-            })
-            self.finish_reason = "stop"
+class OllamaChoice:
+    """Mock choice object for Ollama responses"""
+    def __init__(self, message: OllamaMessage, finish_reason: str = "stop"):
+        self.message = message
+        self.finish_reason = finish_reason
 
-    class _Completion:
-        def __init__(self, content: str):
-            self.choices = [OllamaChatProvider._Choice(content)]
+class OllamaCompletion:
+    """Mock completion object for Ollama responses"""
+    def __init__(self, choices: List[OllamaChoice]):
+        self.choices = choices
 
-    def __init__(self, model: str = "llama3.1:8b-instruct-q4_0",
-                 host: str = "http://localhost:11434",
-                 stream: bool = False):
+class OllamaChatProvider(ChatCompletionProvider):
+    """Ollama Chat completion provider with tool call parsing"""
+    
+    def __init__(self, host: str = "http://localhost:11434", model: str = "llama3.1:8b-instruct-q4_0"):
+        self.host = host.rstrip('/')
         self.model = model
-        self.host = host.rstrip('/')  # Remove trailing slash
-        self.url = f"{self.host}/api/chat"
-        self.stream = stream
-        
-        # Test connection on initialization
-        self._test_connection()
-
-    def _test_connection(self):
-        """Test if Ollama is accessible and the model is available"""
-        try:
-            # Test basic connectivity
-            health_url = f"{self.host}/api/tags"
-            response = requests.get(health_url, timeout=5)
-            response.raise_for_status()
-            
-            # Check if our model is available
-            models = response.json().get('models', [])
-            model_names = [m.get('name', '') for m in models]
-            
-            if self.model not in model_names:
-                logger.warning(f"Model '{self.model}' not found in Ollama. Available models: {model_names}")
-                # Don't fail here - let the actual request fail with better error info
-            else:
-                logger.info(f"Ollama connection successful. Model '{self.model}' is available.")
-                
-        except requests.RequestException as e:
-            logger.error(f"Failed to connect to Ollama at {self.host}: {e}")
-            # Don't raise here - let the actual chat request fail and trigger fallback
-
-    def complete(self, messages: List[Dict[str, Any]], **kwargs):
-        """
-        `messages` should be a list of dicts like
-        { "role": "user", "content": "Hello" }
-        Returns _Completion object mimicking OpenAI client.
-        """
-        # Validate input
-        if not messages:
-            raise ValueError("Messages cannot be empty")
-        
-        # Ensure messages have required fields
-        processed_messages = []
-        for msg in messages:
-            if not isinstance(msg, dict):
-                raise ValueError(f"Message must be dict, got {type(msg)}")
-            if 'role' not in msg or 'content' not in msg:
-                raise ValueError(f"Message missing role or content: {msg}")
-            
-            # Ensure content is not None
-            content = msg['content']
-            if content is None:
-                content = ""
-            
-            processed_messages.append({
-                "role": msg['role'],
-                "content": str(content)
-            })
-
-        payload = {
-            "model": self.model,
-            "messages": processed_messages,
-            "stream": self.stream,
-            **kwargs,
-        }
-        
-        logger.debug(f"Ollama request payload: {json.dumps(payload, indent=2)}")
+        self.last_provider = "ollama"
+        self.session = requests.Session()
+        # Set reasonable timeouts
+        self.session.timeout = (5, 30)  # 5s connect, 30s read
+    
+    def complete(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: Optional[List[Dict[str, Any]]] = None,
+        temperature: float = 0.7,
+        **kwargs
+    ) -> Any:
+        """Create a chat completion using Ollama"""
+        start_time = time.time()
         
         try:
-            response = requests.post(
-                self.url,
-                data=json.dumps(payload).encode('utf-8'),
-                headers={"Content-Type": "application/json"},
-                timeout=60
+            # Convert messages to Ollama format
+            ollama_messages = self._convert_messages(messages)
+            
+            # Build request payload
+            payload = {
+                "model": self.model,
+                "messages": ollama_messages,
+                "stream": False,
+                "options": {
+                    "temperature": temperature,
+                    "num_ctx": 4096,  # Context window
+                    "num_predict": 1024,  # Max tokens to generate
+                }
+            }
+            
+            # Make request to Ollama
+            response = self.session.post(
+                f"{self.host}/api/chat",
+                json=payload,
+                timeout=30
             )
             
-            # Log response status for debugging
-            logger.debug(f"Ollama response status: {response.status_code}")
+            if response.status_code != 200:
+                raise Exception(f"Ollama API error {response.status_code}: {response.text}")
             
-            response.raise_for_status()
+            result = response.json()
+            content = result.get("message", {}).get("content", "").strip()
             
-        except requests.Timeout:
-            raise RuntimeError(f"Ollama request timed out after 60 seconds")
-        except requests.ConnectionError:
-            raise RuntimeError(f"Cannot connect to Ollama at {self.host}. Is Ollama running?")
-        except requests.HTTPError as e:
-            error_detail = ""
-            try:
-                error_detail = f" - {response.text}"
-            except:
-                pass
-            raise RuntimeError(f"Ollama HTTP error {response.status_code}{error_detail}")
-        except requests.RequestException as e:
-            raise RuntimeError(f"Ollama request failed: {e}")
-
+            if not content:
+                raise Exception("Ollama returned empty response")
+            
+            elapsed = time.time() - start_time
+            logger.debug(f"Ollama responded in {elapsed:.2f}s: {content[:100]}...")
+            
+            # Create response object
+            message = OllamaMessage(content)
+            choice = OllamaChoice(message)
+            return OllamaCompletion([choice])
+            
+        except requests.exceptions.Timeout:
+            elapsed = time.time() - start_time
+            logger.warning(f"Ollama request timed out after {elapsed:.1f}s")
+            raise Exception("Ollama request timed out")
+            
+        except requests.exceptions.ConnectionError:
+            logger.warning("Could not connect to Ollama server")
+            raise Exception("Ollama connection failed")
+            
+        except Exception as e:
+            elapsed = time.time() - start_time
+            logger.error(f"Ollama error after {elapsed:.1f}s: {e}")
+            raise
+    
+    def _convert_messages(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Convert OpenAI-style messages to Ollama format"""
+        ollama_messages = []
+        
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            
+            # Handle system messages
+            if role == "system":
+                ollama_messages.append({
+                    "role": "system",
+                    "content": content
+                })
+            
+            # Handle user messages
+            elif role == "user":
+                ollama_messages.append({
+                    "role": "user", 
+                    "content": content
+                })
+            
+            # Handle assistant messages
+            elif role == "assistant":
+                # If assistant message has tool calls, we need to format differently
+                if msg.get("tool_calls"):
+                    # For Ollama, we'll include tool call info in the content
+                    tool_info = []
+                    for tc in msg["tool_calls"]:
+                        if hasattr(tc, 'function'):
+                            tool_info.append(f"Called {tc.function.name} with {tc.function.arguments}")
+                        elif isinstance(tc, dict):
+                            func_info = tc.get('function', {})
+                            tool_info.append(f"Called {func_info.get('name', 'unknown')} with {func_info.get('arguments', '{}')}")
+                    
+                    combined_content = content
+                    if tool_info:
+                        combined_content = f"{content}\n[Tools used: {'; '.join(tool_info)}]"
+                    
+                    ollama_messages.append({
+                        "role": "assistant",
+                        "content": combined_content
+                    })
+                else:
+                    ollama_messages.append({
+                        "role": "assistant",
+                        "content": content
+                    })
+            
+            # Handle tool messages - convert to user messages for Ollama
+            elif role == "tool":
+                tool_content = f"Tool result: {content}"
+                ollama_messages.append({
+                    "role": "user",
+                    "content": tool_content
+                })
+        
+        return ollama_messages
+    
+    def test_connection(self) -> bool:
+        """Test if Ollama server is accessible"""
         try:
-            data = response.json()
-        except json.JSONDecodeError as e:
-            raise RuntimeError(f"Invalid JSON response from Ollama: {e}")
-
-        # Validate response structure
-        if "message" not in data:
-            raise RuntimeError(f"Unexpected Ollama response format: {data}")
-        
-        if "content" not in data["message"]:
-            raise RuntimeError(f"Missing content in Ollama response: {data}")
-
-        reply_text = data["message"]["content"]
-        
-        # Validate we got actual content
-        if not reply_text or reply_text.strip() == "":
-            raise RuntimeError("Ollama returned empty response")
-        
-        logger.debug(f"Ollama response: {reply_text[:100]}...")
-        return OllamaChatProvider._Completion(reply_text)
-
-    def generate_stream(self, messages: List[Dict[str, Any]], **kwargs):
-        """Optional: synchronous generator for streaming tokens"""
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": True,
-            **kwargs,
-        }
-        
+            response = self.session.get(f"{self.host}/api/tags", timeout=5)
+            return response.status_code == 200
+        except:
+            return False
+    
+    def list_models(self) -> List[str]:
+        """List available models from Ollama"""
         try:
-            with requests.post(
-                self.url,
-                data=json.dumps(payload).encode('utf-8'),
-                headers={"Content-Type": "application/json"},
-                timeout=60,
-                stream=True
-            ) as response:
-                response.raise_for_status()
-                
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                        if "message" in chunk and "content" in chunk["message"]:
-                            yield chunk["message"]["content"]
-                    except json.JSONDecodeError:
-                        logger.warning(f"Failed to parse streaming chunk: {line}")
-                        continue
-                        
-        except requests.RequestException as e:
-            raise RuntimeError(f"Ollama streaming failed: {e}")
+            response = self.session.get(f"{self.host}/api/tags", timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                return [model["name"] for model in data.get("models", [])]
+        except Exception as e:
+            logger.error(f"Failed to list Ollama models: {e}")
+        return []

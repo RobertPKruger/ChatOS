@@ -1,6 +1,6 @@
-# voice_assistant/conversation.py
+# voice_assistant/conversation.py - FIXED TEXT EXTRACTION
 """
-Main conversation loop and management with proper tool handling for local vs backup models
+Main conversation loop with improved text extraction and error handling
 """
 
 import asyncio
@@ -26,7 +26,7 @@ class ConversationManager:
         self.stuck_task: Optional[asyncio.Task] = None
 
     def _extract_text_from_any_format(self, data):
-        """Aggressively extract text from any data format"""
+        """FIXED: Aggressively extract text from any data format"""
         if data is None:
             return ""
         
@@ -34,34 +34,27 @@ class ConversationManager:
         if isinstance(data, str):
             return data
         
-        # TextContent object
+        # Handle TextContent objects (from MCP)
         if hasattr(data, 'text'):
             return str(data.text)
         
-        # List of objects
+        # Handle list of TextContent objects
         if isinstance(data, list):
             if len(data) == 0:
                 return ""
             
-            # Try first element
-            first_item = data[0]
+            text_parts = []
+            for item in data:
+                if hasattr(item, 'text'):
+                    text_parts.append(str(item.text))
+                elif isinstance(item, str):
+                    text_parts.append(item)
+                elif isinstance(item, dict) and 'text' in item:
+                    text_parts.append(str(item['text']))
+                else:
+                    text_parts.append(str(item))
             
-            # First item has text
-            if hasattr(first_item, 'text'):
-                return str(first_item.text)
-            
-            # First item is string
-            if isinstance(first_item, str):
-                return first_item
-            
-            # First item is dict
-            if isinstance(first_item, dict):
-                for key in ['text', 'content', 'message', 'result']:
-                    if key in first_item:
-                        return str(first_item[key])
-            
-            # Convert first item to string
-            return str(first_item)
+            return " ".join(text_parts)
         
         # Dictionary
         if isinstance(data, dict):
@@ -82,9 +75,13 @@ class ConversationManager:
             for pattern in patterns:
                 match = re.search(pattern, data_str)
                 if match:
-                    return match.group(1).strip('\'"')
+                    extracted = match.group(1).strip('\'"')
+                    # Clean up common artifacts
+                    if extracted.endswith("', annotations=None"):
+                        extracted = extracted.replace("', annotations=None", "")
+                    return extracted
         
-        return data_str
+        return data_str.strip()
         
     async def stuck_detection_task(self):
         """Background task to check if assistant is stuck and listen for wake phrase"""
@@ -306,7 +303,7 @@ class ConversationManager:
                             mcp_client, tool_call, self.config.tool_timeout
                         )
                         
-                        # Use the aggressive text extraction
+                        # FIXED: Use the improved text extraction
                         clean_result = self._extract_text_from_any_format(tool_result)
                         
                         # Log for debugging
@@ -317,7 +314,7 @@ class ConversationManager:
                         self.state.add_tool_message(tool_call.id, clean_result)
                         
                     except Exception as tool_error:
-                        # Tool failed - clean up and trigger manual fallback
+                        # Tool failed - trigger backup immediately for better reliability
                         logger.warning(f"Tool {tool_call.function.name} failed: {tool_error}")
                         
                         # Remove the assistant message with tool_calls that we just added
@@ -326,94 +323,22 @@ class ConversationManager:
                             "tool_calls" in self.state.conversation_history[-1]):
                             self.state.conversation_history.pop()
                         
-                        # Manually trigger OpenAI fallback for this request
-                        logger.info("Tool failed - manually triggering OpenAI fallback")
+                        # Use the backup provider directly
+                        logger.info("Tool failed - using backup provider for this request")
                         
                         try:
-                            # Force OpenAI to handle the original request
+                            # Force backup to handle the original request
                             from .model_providers.openai_chat import OpenAIChatProvider
                             backup_provider = OpenAIChatProvider(
                                 api_key=self.config.openai_api_key,
                                 model=self.config.frontier_chat_model
                             )
                             
-                            # Clean the conversation history for OpenAI (serialize tool calls)
-                            clean_history = []
-                            for msg in self.state.conversation_history:
-                                if isinstance(msg, dict):
-                                    clean_msg = dict(msg)
-                                    if 'tool_calls' in clean_msg and clean_msg['tool_calls']:
-                                        # Serialize tool calls properly
-                                        clean_tool_calls = []
-                                        for tc in clean_msg['tool_calls']:
-                                            if isinstance(tc, dict):
-                                                clean_tool_calls.append(tc)
-                                            else:
-                                                # Convert object to dict
-                                                clean_tc = {
-                                                    'id': getattr(tc, 'id', ''),
-                                                    'type': getattr(tc, 'type', 'function'),
-                                                    'function': {
-                                                        'name': getattr(tc.function, 'name', '') if hasattr(tc, 'function') else '',
-                                                        'arguments': getattr(tc.function, 'arguments', '{}') if hasattr(tc, 'function') else '{}'
-                                                    }
-                                                }
-                                                clean_tool_calls.append(clean_tc)
-                                        clean_msg['tool_calls'] = clean_tool_calls
-                                    clean_history.append(clean_msg)
-                                else:
-                                    clean_history.append(msg)
-                            
-                            # Validate conversation history - remove orphaned tool_calls
-                            validated_history = []
-                            i = 0
-                            while i < len(clean_history):
-                                msg = clean_history[i]
-                                
-                                # If this is an assistant message with tool_calls
-                                if (msg.get('role') == 'assistant' and 
-                                    msg.get('tool_calls')):
-                                    
-                                    # Check if all tool_calls have corresponding tool responses
-                                    tool_call_ids = [tc['id'] for tc in msg['tool_calls']]
-                                    validated_msg = dict(msg)
-                                    validated_history.append(validated_msg)
-                                    
-                                    # Look for corresponding tool responses
-                                    j = i + 1
-                                    found_responses = set()
-                                    
-                                    while j < len(clean_history) and clean_history[j].get('role') == 'tool':
-                                        tool_response = clean_history[j]
-                                        tool_call_id = tool_response.get('tool_call_id')
-                                        if tool_call_id in tool_call_ids:
-                                            validated_history.append(tool_response)
-                                            found_responses.add(tool_call_id)
-                                        j += 1
-                                    
-                                    # If some tool_calls don't have responses, remove them
-                                    if len(found_responses) < len(tool_call_ids):
-                                        logger.warning(f"Removing orphaned tool_calls: {set(tool_call_ids) - found_responses}")
-                                        # Filter out tool_calls that don't have responses
-                                        validated_msg['tool_calls'] = [
-                                            tc for tc in validated_msg['tool_calls'] 
-                                            if tc['id'] in found_responses
-                                        ]
-                                        
-                                        # If no tool_calls remain, convert to regular response
-                                        if not validated_msg['tool_calls']:
-                                            validated_msg.pop('tool_calls', None)
-                                            if not validated_msg.get('content'):
-                                                validated_msg['content'] = "I'll help you with that."
-                                    
-                                    i = j  # Skip the tool responses we already processed
-                                else:
-                                    # Regular message
-                                    validated_history.append(msg)
-                                    i += 1
+                            # Clean the conversation history for OpenAI
+                            clean_history = self._clean_conversation_history()
                             
                             fallback_completion = backup_provider.complete(
-                                messages=validated_history,
+                                messages=clean_history,
                                 tools=tools,
                                 tool_choice="auto"
                             )
@@ -421,13 +346,21 @@ class ConversationManager:
                             fallback_choice = fallback_completion.choices[0]
                             fallback_message = fallback_choice.message
                             
-                            # Handle OpenAI's response (might include tool calls)
+                            # Handle OpenAI's response
                             if fallback_choice.finish_reason == "tool_calls" and fallback_message.tool_calls:
-                                # Add OpenAI's assistant message
                                 self.state.conversation_history.append({
                                     "role": "assistant",
                                     "content": fallback_message.content,
-                                    "tool_calls": fallback_message.tool_calls
+                                    "tool_calls": [
+                                        {
+                                            'id': tc.id,
+                                            'type': tc.type,
+                                            'function': {
+                                                'name': tc.function.name,
+                                                'arguments': tc.function.arguments
+                                            }
+                                        } for tc in fallback_message.tool_calls
+                                    ]
                                 })
                                 
                                 # Execute OpenAI's tool calls
@@ -437,10 +370,12 @@ class ConversationManager:
                                             mcp_client, backup_tool_call, self.config.tool_timeout
                                         )
                                         
+                                        clean_backup_result = self._extract_text_from_any_format(backup_result)
+                                        
                                         self.state.conversation_history.append({
                                             "role": "tool",
                                             "tool_call_id": backup_tool_call.id,
-                                            "content": backup_result
+                                            "content": clean_backup_result
                                         })
                                     except Exception as backup_tool_error:
                                         logger.error(f"Backup tool also failed: {backup_tool_error}")
@@ -454,45 +389,39 @@ class ConversationManager:
                                 )
                                 
                                 final_response = final_completion.choices[0].message.content or "Task completed."
-                                # CRITICAL FIX: Clean the final response before storing
                                 final_response = self._extract_text_from_any_format(final_response)
                                 self.state.conversation_history.append({
                                     "role": "assistant",
                                     "content": final_response
                                 })
                                 
-                                logger.info("Turn answered by: backup (manual fallback)")
+                                logger.info("Turn answered by: backup (tool failure fallback)")
                                 return final_response
                             else:
                                 # OpenAI gave direct response
                                 response = fallback_message.content or "I can help you with that."
-                                # CRITICAL FIX: Clean the response before storing
                                 response = self._extract_text_from_any_format(response)
                                 self.state.conversation_history.append({
                                     "role": "assistant",
                                     "content": response
                                 })
                                 
-                                logger.info("Turn answered by: backup (manual fallback)")
+                                logger.info("Turn answered by: backup (tool failure fallback)")
                                 return response
                                 
                         except Exception as fallback_error:
-                            logger.error(f"Manual fallback also failed: {fallback_error}")
+                            logger.error(f"Backup provider also failed: {fallback_error}")
                             return "I'm having trouble processing your request. Please try again."
                 
                 # Get the model's follow-up response if not interrupted and all tools succeeded
                 if not self.state.interrupt_flag.is_set() and self.state.get_mode() != AssistantMode.STUCK_CHECK:
-                    # Track tool results for potential improvement - with aggressive extraction
+                    # Track tool results for potential improvement
                     tool_results = []
                     for msg in self.state.conversation_history:
                         if msg.get("role") == "tool":
                             content = msg.get("content", "")
-                            # Extract text even from stored content (double-check)
                             clean_content = self._extract_text_from_any_format(content)
                             tool_results.append(clean_content)
-                    
-                    # Log what we collected
-                    logger.debug(f"Collected tool results: {[r[:50] for r in tool_results]}")
                     
                     # For follow-up, use the same tools logic
                     if use_tools:
@@ -516,18 +445,20 @@ class ConversationManager:
                         # The local model is confused - extract the tool result directly and use it as response
                         if tool_results:
                             logger.info("Using tool result directly as response since local model is confused")
-                            # tool_results already contains cleaned text, so use it directly
                             raw_result = tool_results[-1]
                             
                             # Clean up the response - check if it looks like a launch message
                             if "Launched" in raw_result or "opened" in raw_result.lower():
                                 assistant_response = raw_result.strip()
+                            elif "Steam Games" in raw_result or "App ID:" in raw_result:
+                                assistant_response = f"Here are your Steam games:\n{raw_result}"
                             else:
-                                # For other results like game lists, present them cleanly
-                                if "Steam Games" in raw_result or "App ID:" in raw_result:
-                                    assistant_response = f"Here are your Steam games:\n{raw_result}"
-                                else:
-                                    assistant_response = raw_result.strip()
+                                # For other results, use them directly but clean up
+                                assistant_response = raw_result.strip()
+                                
+                            # Ensure we have a reasonable response
+                            if not assistant_response or len(assistant_response.strip()) < 3:
+                                assistant_response = "Task completed successfully."
                         else:
                             assistant_response = "Task completed successfully."
                             
@@ -539,7 +470,6 @@ class ConversationManager:
                     else:
                         # Normal text response from the model
                         assistant_response = follow_up_message.content or "Task completed."
-                        # CRITICAL FIX: Clean the response before storing and returning
                         assistant_response = self._extract_text_from_any_format(assistant_response)
                         
                         # Check if the response is too generic and improve it
@@ -557,7 +487,6 @@ class ConversationManager:
             else:
                 # Direct response without tool calls
                 assistant_response = message.content or "I'm not sure how to respond to that."
-                # CRITICAL FIX: Clean the response before storing and returning
                 assistant_response = self._extract_text_from_any_format(assistant_response)
                 self.state.conversation_history.append({
                     "role": "assistant", 
@@ -567,9 +496,37 @@ class ConversationManager:
             return assistant_response
             
         except Exception as e:
-            # Handle all errors at this level - don't re-raise tool errors
+            # Handle all errors at this level
             logger.error(f"Error in chat completion: {e}")
             return "I encountered an error processing your request. Please try again."
+
+    def _clean_conversation_history(self):
+        """Clean conversation history for OpenAI compatibility"""
+        clean_history = []
+        for msg in self.state.conversation_history:
+            if isinstance(msg, dict):
+                clean_msg = dict(msg)
+                if 'tool_calls' in clean_msg and clean_msg['tool_calls']:
+                    clean_tool_calls = []
+                    for tc in clean_msg['tool_calls']:
+                        if isinstance(tc, dict):
+                            clean_tool_calls.append(tc)
+                        else:
+                            clean_tc = {
+                                'id': getattr(tc, 'id', ''),
+                                'type': getattr(tc, 'type', 'function'),
+                                'function': {
+                                    'name': getattr(tc.function, 'name', '') if hasattr(tc, 'function') else '',
+                                    'arguments': getattr(tc.function, 'arguments', '{}') if hasattr(tc, 'function') else '{}'
+                                }
+                            }
+                            clean_tool_calls.append(clean_tc)
+                    clean_msg['tool_calls'] = clean_tool_calls
+                clean_history.append(clean_msg)
+            else:
+                clean_history.append(msg)
+        
+        return clean_history
 
     async def conversation_loop(self):
         """Main conversation loop with sleep/wake functionality"""
@@ -714,15 +671,7 @@ class ConversationManager:
                         self.state.set_mode(AssistantMode.LISTENING)
                         
                 except Exception as e:
-                    # Don't catch tool execution errors - let them bubble up to failover
-                    if "Tool execution failed:" in str(e):
-                        logger.info(f"Tool error bubbling up - this should not happen, failover should handle it")
-                        self.state.set_mode(AssistantMode.ERROR)
-                        await asyncio.sleep(self.config.reconnect_delay)
-                        self.state.set_mode(AssistantMode.LISTENING)
-                        continue
-                    
-                    # Handle other conversation-level errors
+                    # Handle conversation-level errors
                     logger.error(f"Error in conversation loop: {e}")
                     self.state.set_mode(AssistantMode.ERROR)
                     await asyncio.sleep(self.config.reconnect_delay)

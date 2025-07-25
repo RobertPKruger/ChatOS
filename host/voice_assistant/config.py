@@ -1,6 +1,6 @@
-# voice_assistant/config.py - CLEANED VERSION
+# voice_assistant/config.py - PERFORMANCE OPTIMIZED
 """
-Configuration management for the voice assistant
+Configuration management for the voice assistant with performance optimizations
 """
 
 import os
@@ -74,7 +74,7 @@ class Config:
     
     @classmethod
     def from_env(cls) -> "Config":
-        """Load configuration from environment variables"""
+        """Load configuration from environment variables with performance optimizations"""
         return cls(
             # === CORE SETTINGS ===
             use_local_first=os.getenv("USE_LOCAL_FIRST", "true").lower() in ["true", "1", "yes", "on"],
@@ -89,7 +89,8 @@ class Config:
             # Chat Models
             local_chat_model=os.getenv("LOCAL_CHAT_MODEL", "llama3.1:8b-instruct-q4_0"),
             frontier_chat_model=os.getenv("FRONTIER_CHAT_MODEL", "gpt-4o"),
-            local_chat_timeout=float(os.getenv("LOCAL_CHAT_TIMEOUT", "30")),
+            # OPTIMIZED: Reduced timeout from 30 to 12 seconds for better UX
+            local_chat_timeout=float(os.getenv("LOCAL_CHAT_TIMEOUT", "12")),
             
             # TTS
             tts_model=os.getenv("TTS_MODEL", "tts-1"),
@@ -111,7 +112,8 @@ class Config:
             
             # === PROCESSING CONFIGURATION ===
             tool_timeout=float(os.getenv("TOOL_TIMEOUT", "30.0")),
-            processing_timeout=float(os.getenv("PROCESSING_TIMEOUT", "60.0")),
+            # OPTIMIZED: Reduced from 60 to 45 seconds
+            processing_timeout=float(os.getenv("PROCESSING_TIMEOUT", "45.0")),
             stuck_phrase=os.getenv("STUCK_PHRASE", "hello abraxas are you stuck").lower().replace(",", "").replace("?", ""),
             stuck_check_interval=float(os.getenv("STUCK_CHECK_INTERVAL", "5.0")),
             
