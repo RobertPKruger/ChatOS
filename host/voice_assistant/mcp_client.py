@@ -1,6 +1,6 @@
-# voice_assistant/mcp_client.py
+# voice_assistant/mcp_client.py - UPDATED WITH CACHING
 """
-MCP (Model Context Protocol) client management
+MCP (Model Context Protocol) client management with performance optimizations
 """
 
 import asyncio
@@ -19,6 +19,11 @@ from fastmcp import Client
 from .state import AssistantState
 
 logger = logging.getLogger(__name__)
+
+# Global tool cache for performance
+TOOLS_CACHE = None
+TOOLS_CACHE_TIME = 0
+CACHE_DURATION = 300  # 5 minutes cache
 
 @asynccontextmanager
 async def get_mcp_client(state: AssistantState):
@@ -53,6 +58,50 @@ async def get_mcp_client(state: AssistantState):
             except:
                 pass
         raise
+
+async def get_tools_cached(mcp_client: Client, state: AssistantState) -> List[Dict[str, Any]]:
+    """Get tools with global caching for better performance"""
+    global TOOLS_CACHE, TOOLS_CACHE_TIME
+    
+    current_time = time.time()
+    
+    # DEBUG: Print cache status (Windows-safe)
+    print("DEBUG: get_tools_cached called")
+    print(f"DEBUG: TOOLS_CACHE exists: {TOOLS_CACHE is not None}")
+    print(f"DEBUG: Cache time: {TOOLS_CACHE_TIME}, Current: {current_time}")
+    print(f"DEBUG: Cache age: {current_time - TOOLS_CACHE_TIME:.1f}s, Duration: {CACHE_DURATION}s")
+    
+    # Return cached tools if still valid
+    if TOOLS_CACHE and (current_time - TOOLS_CACHE_TIME) < CACHE_DURATION:
+        print(f"Using cached tools ({len(TOOLS_CACHE)} tools)")
+        logger.debug(f"Using cached tools ({len(TOOLS_CACHE)} tools)")
+        return TOOLS_CACHE
+    
+    # Cache expired or doesn't exist - reload
+    print("Refreshing tool cache...")
+    logger.info("Refreshing tool cache...")
+    start_time = time.time()
+    
+    try:
+        TOOLS_CACHE = await get_tools(mcp_client, state, use_cache=False)
+        TOOLS_CACHE_TIME = current_time
+        
+        load_time = time.time() - start_time
+        print(f"Cached {len(TOOLS_CACHE)} tools in {load_time:.2f}s")
+        logger.info(f"Cached {len(TOOLS_CACHE)} tools in {load_time:.2f}s")
+        
+        return TOOLS_CACHE
+        
+    except Exception as e:
+        logger.error(f"Failed to refresh tool cache: {e}")
+        # Return old cache if available, otherwise empty list
+        return TOOLS_CACHE if TOOLS_CACHE else []
+
+def invalidate_tools_cache():
+    """Force cache refresh on next request"""
+    global TOOLS_CACHE_TIME
+    TOOLS_CACHE_TIME = 0
+    logger.info("Tool cache invalidated")
 
 async def get_tools(mcp_client: Client, state: AssistantState, use_cache: bool = True) -> List[Dict[str, Any]]:
     """Get tools from MCP server with caching"""
@@ -109,6 +158,29 @@ async def get_tools(mcp_client: Client, state: AssistantState, use_cache: bool =
     logger.info(f"Loaded {len(tools)} tools")
     
     return tools
+
+async def call_tool_with_timeout_optimized(mcp_client: Client, call, timeout: float = 10) -> str:
+    """Optimized tool execution with faster timeout and better error handling"""
+    start_time = time.time()
+    
+    try:
+        # Use the existing call_tool_with_timeout but with timing
+        result = await call_tool_with_timeout(mcp_client, call, timeout)
+        
+        execution_time = time.time() - start_time
+        logger.debug(f"Tool executed in {execution_time:.2f}s")
+        
+        return result
+        
+    except asyncio.TimeoutError:
+        execution_time = time.time() - start_time
+        logger.warning(f"Tool timed out after {execution_time:.2f}s")
+        raise
+        
+    except Exception as e:
+        execution_time = time.time() - start_time
+        logger.error(f"Tool failed after {execution_time:.2f}s: {e}")
+        raise
 
 async def call_tool_with_timeout(mcp_client: Client, call, timeout: float) -> str:
     """Execute a tool call with timeout and error handling"""
@@ -202,7 +274,14 @@ async def call_tool_with_timeout(mcp_client: Client, call, timeout: float) -> st
         raise Exception(error_msg)  # Changed: Raise exception instead of returning
 
 async def shutdown_mcp_server(state: AssistantState):
-    """Properly shut down MCP server"""
+    """Properly shut down MCP server and clear caches"""
+    global TOOLS_CACHE, TOOLS_CACHE_TIME
+    
+    # Clear global cache
+    TOOLS_CACHE = None
+    TOOLS_CACHE_TIME = 0
+    logger.info("Cleared tool cache on shutdown")
+    
     # Close MCP client
     if state.mcp_client:
         try:
@@ -227,3 +306,7 @@ async def shutdown_mcp_server(state: AssistantState):
             logger.info("MCP server process terminated")
         except Exception as e:
             logger.error(f"Error terminating MCP server: {e}")
+
+# Backward compatibility aliases
+get_tools_fast = get_tools_cached
+call_tool_fast = call_tool_with_timeout_optimized

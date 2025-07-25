@@ -20,7 +20,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from voice_assistant.config import Config, setup_logging
 from voice_assistant.state import AssistantState, AssistantMode
 from voice_assistant.conversation import ConversationManager
-from voice_assistant.mcp_client import get_mcp_client, get_tools, shutdown_mcp_server
+from voice_assistant.mcp_client import get_mcp_client, get_tools_cached, shutdown_mcp_server
 from voice_assistant.utils import signal_handler
 
 logger = logging.getLogger(__name__)
@@ -362,7 +362,7 @@ async def simple_fixed_cli_main():
         state.mcp_client = mcp_client
         
         # Load tools
-        tools = await get_tools(mcp_client, state)
+        tools = await get_tools_cached(mcp_client, state)
         print(f"🔧 Loaded {len(tools)} tools")
         
         print("🤖 Assistant: Hello! I'm ready to help. What can I do for you?")

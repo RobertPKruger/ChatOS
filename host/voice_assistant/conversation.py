@@ -11,7 +11,7 @@ from openai import OpenAI
 from .state import AssistantState, AssistantMode
 from .audio import ContinuousAudioRecorder
 from .speech import transcribe_audio, speak_text
-from .mcp_client import get_mcp_client, get_tools, call_tool_with_timeout, shutdown_mcp_server
+from .mcp_client import get_mcp_client, get_tools_cached, call_tool_with_timeout, shutdown_mcp_server
 from .config import Config
 
 logger = logging.getLogger(__name__)
@@ -265,7 +265,7 @@ class ConversationManager:
     async def process_user_input(self, user_text: str, mcp_client, tools):
         """Process user input and generate response"""
         # Add user message to history
-        self.state.conversation_history.append({"role": "user", "content": user_text})
+        self.state.add_user_message(user_text)
         
         try:
             # Determine if we should pass tools parameter based on the provider
@@ -291,11 +291,7 @@ class ConversationManager:
             
             if choice.finish_reason == "tool_calls" and message.tool_calls:
                 # Handle tool calls
-                self.state.conversation_history.append({
-                    "role": "assistant",
-                    "content": message.content,
-                    "tool_calls": message.tool_calls
-                })
+                self.state.add_assistant_message(message.content, message.tool_calls)
                 
                 # Execute each tool call
                 for tool_call in message.tool_calls:
@@ -318,11 +314,7 @@ class ConversationManager:
                         logger.debug(f"Tool {tool_call.function.name} clean result: {clean_result[:100]}...")
                         
                         # Add tool result to history with clean text
-                        self.state.conversation_history.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call.id,
-                            "content": clean_result  # Store clean text instead of raw object
-                        })
+                        self.state.add_tool_message(tool_call.id, clean_result)
                         
                     except Exception as tool_error:
                         # Tool failed - clean up and trigger manual fallback
@@ -604,7 +596,7 @@ class ConversationManager:
             self.state.mcp_client = mcp_client
             
             # Load tools
-            tools = await get_tools(mcp_client, self.state)
+            tools = await get_tools_cached(mcp_client, self.state)
             
             # Initial greeting
             await speak_text("Hello! I'm listening. You can say 'go to sleep' to put me in sleep mode.", self.state, self.config)

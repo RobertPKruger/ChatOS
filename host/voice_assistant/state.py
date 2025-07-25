@@ -131,3 +131,39 @@ class AssistantState:
         """Reset the conversation history"""
         self.conversation_history = [{"role": "system", "content": SYSTEM_PROMPT}]
         logger.info("Conversation history reset")
+
+    MAX_HISTORY_TOKENS = 4000  # Approximate token limit
+
+    def trim_conversation_history(self):
+        logger.info(f"Entering conversation history trim: {len(self.conversation_history)} messages")
+        """Trim conversation history to prevent exponential slowdown"""
+        original_length = len(self.conversation_history)
+        
+        # Keep system prompt + last 8 messages (4 exchanges)
+        if len(self.conversation_history) > 10:
+            system_msg = self.conversation_history[0]
+            recent_msgs = self.conversation_history[-8:]
+            self.conversation_history = [system_msg] + recent_msgs
+            logger.info(f"Trimmed conversation: {original_length} → {len(self.conversation_history)} messages")
+
+    def add_user_message(self, content: str):
+        """Add user message and auto-trim if needed"""
+        self.conversation_history.append({"role": "user", "content": content})
+        self.trim_conversation_history()
+
+    def add_assistant_message(self, content: str, tool_calls=None):
+        """Add assistant message and auto-trim if needed"""
+        msg = {"role": "assistant", "content": content}
+        if tool_calls:
+            msg["tool_calls"] = tool_calls
+        self.conversation_history.append(msg)
+        self.trim_conversation_history()
+
+    def add_tool_message(self, tool_call_id: str, content: str):
+        """Add tool result message and auto-trim if needed"""
+        self.conversation_history.append({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "content": content
+        })
+        self.trim_conversation_history()
