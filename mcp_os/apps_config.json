@@ -1,6 +1,13 @@
 {
   "aliases": {
     "windows": {
+      "amazon.com": [
+        "amazon", "go to amazon", "open amazon", "shop amazon", "shop on amazon","www.amazon.com"
+      ],
+      "github.com": ["github", "go to github", "open github", "www.github.com"],
+      "weather.com": ["weather", "go to weather", "open weather", "check weather", "weather.com"],
+      "reddit.com": ["reddit", "go to reddit", "open reddit", "www.reddit.com"],
+      "noaa.gov": ["noaa", "go to noaa", "open noaa", "check noaa", "www.noaa.gov"],
       "notepad": ["notepad", "notes", "note", "text editor", "texteditor"],
       "calculator": ["calc", "calculator", "calculations", "math"],
       "explorer": ["explorer", "file explorer", "files", "folder", "folders", "file manager"],
@@ -45,6 +52,11 @@
     }
   },
   "windows": {
+    "amazon.com": ["url:https://www.amazon.com"],
+    "github.com": ["url:https://www.github.com"],
+    "weather.com": ["url:https://www.weather.com"],
+    "reddit.com": ["url:https://www.reddit.com"],
+    "noaa.gov": ["url:https://www.noaa.gov"],
     "notepad": ["notepad.exe"],
     "calculator": ["calc.exe", "calculator.exe"],
     "calc": ["calc.exe", "calculator.exe"],

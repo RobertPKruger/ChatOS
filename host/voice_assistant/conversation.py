@@ -24,6 +24,7 @@ class ConversationManager:
         self.state = state
         self.audio_recorder = audio_recorder
         self.stuck_task: Optional[asyncio.Task] = None
+        self.successful_launch = False  # Track successful app launches
 
     def _is_response_readable(self, text: str) -> bool:
         """Check if a response is clean and readable for speech synthesis"""
@@ -177,6 +178,21 @@ class ConversationManager:
         
         # Last resort - convert to string
         return str(data).strip()
+    
+    def _is_successful_launch(self, text: str) -> bool:
+        """Check if text indicates a successful app launch"""
+        if not text:
+            return False
+        lower_text = text.lower()
+        # Look for success indicators
+        success_indicators = ["launched", "opening", "started successfully"]
+        # Look for failure indicators
+        failure_indicators = ["failed", "error", "not found", "could not", "couldn't", "unable"]
+        
+        has_success = any(indicator in lower_text for indicator in success_indicators)
+        has_failure = any(indicator in lower_text for indicator in failure_indicators)
+        
+        return has_success and not has_failure
         
     async def stuck_detection_task(self):
         """Background task to check if assistant is stuck and listen for wake phrase"""
@@ -188,6 +204,7 @@ class ConversationManager:
                 # Only check if we're in processing mode and stuck
                 if self.state.is_stuck(self.config.processing_timeout):
                     logger.warning(f"Assistant appears stuck (processing for {self.config.processing_timeout}s)")
+                    
                     self.state.set_mode(AssistantMode.STUCK_CHECK)
                     
                     # Try to detect the wake phrase
@@ -228,6 +245,20 @@ class ConversationManager:
     async def handle_special_commands(self, text: str) -> bool:
         """Handle special commands and return True if handled"""
         lower_text = text.lower().strip()
+
+        # Launch acknowledgment toggle commands
+        if any(phrase in lower_text for phrase in ["turn on launch acknowledgment", "enable launch acknowledgment", 
+                                                     "turn on launch acknowledgements", "enable launch acknowledgements"]):
+            self.config.acknowledge_launches = True
+            await speak_text("Launch acknowledgments enabled.", self.state, self.config)
+            return True
+            
+        if any(phrase in lower_text for phrase in ["turn off launch acknowledgment", "disable launch acknowledgment",
+                                                    "turn off launch acknowledgements", "disable launch acknowledgements",
+                                                    "no launch acknowledgment", "no launch acknowledgements"]):
+            self.config.acknowledge_launches = False
+            await speak_text("Launch acknowledgments disabled.", self.state, self.config)
+            return True
 
         if "use local model" in lower_text or "enable local" in lower_text:
             if not self.config.use_local_first:
@@ -341,6 +372,7 @@ class ConversationManager:
         
         # Add user message to history
         self.state.add_user_message(user_text)
+        self.successful_launch = False  # Reset for this request
         
         try:
             # Determine if we should pass tools parameter based on the provider
@@ -387,6 +419,11 @@ class ConversationManager:
                         
                         # Extract clean text from result
                         clean_result = self._extract_text_from_any_format(tool_result)
+
+                        # Check if this was a successful launch
+                        if self._is_successful_launch(clean_result):
+                            self.successful_launch = True
+                            logger.debug(f"Detected successful launch in: {clean_result[:50]}...")
                         
                         # Log for debugging
                         logger.debug(f"Tool {tool_call.function.name} raw result type: {type(tool_result)}")
@@ -453,6 +490,10 @@ class ConversationManager:
                                         )
                                         
                                         clean_backup_result = self._extract_text_from_any_format(backup_result)
+                                        # Check if backup resulted in successful launch
+                                        if self._is_successful_launch(clean_backup_result):
+                                            self.successful_launch = True
+                                            logger.debug(f"Detected successful launch in backup: {clean_backup_result[:50]}...")
                                         
                                         self.state.conversation_history.append({
                                             "role": "tool",
@@ -625,7 +666,7 @@ class ConversationManager:
             
             # Initial greeting
             await speak_text("Hello! I'm listening. You can say 'go to sleep' to put me in sleep mode.", self.state, self.config)
-            
+                       
             while self.state.running:
                 try:
                     current_mode = self.state.get_mode()
@@ -731,8 +772,12 @@ class ConversationManager:
                         
                         # Speak the response if not interrupted
                         if not self.state.interrupt_flag.is_set() and \
-                           self.state.get_mode() != AssistantMode.STUCK_CHECK:
-                            await speak_text(clean_response, self.state, self.config)
+                            self.state.get_mode() != AssistantMode.STUCK_CHECK:
+                            if self.successful_launch and not self.config.acknowledge_launches:
+                                self.state.set_mode(AssistantMode.LISTENING)
+                                logger.info("Launch detected but acknowledgment disabled. Skipping speech.")
+                            else:
+                                await speak_text(clean_response, self.state, self.config)
                         else:
                             logger.info("Skipping speech due to interruption")
                             self.state.set_mode(AssistantMode.LISTENING)

@@ -7,6 +7,8 @@ import shutil
 import platform
 import json
 import logging
+import webbrowser
+import re
 
 mcp = FastMCP("local-os")
 
@@ -106,34 +108,71 @@ def find_executable(app_paths):
     
     return None
 
+def normalize_text(text: str) -> str:
+    return re.sub(r'[^a-z0-9]', '', text.lower().strip())
+
 def resolve_app_name(app_name: str) -> str:
-    """Resolve an app name or alias to the primary app name."""
-    lower_name = app_name.lower()
-    
-    # First check if it's already a primary app name
+    lower_name = app_name.lower().strip()
+    normalized_name = normalize_text(lower_name)
+
+    # Check for exact app match
     if lower_name in APPS:
         return lower_name
-    
-    # Check if it's an alias
-    if "_reverse" in ALIASES and lower_name in ALIASES["_reverse"]:
-        return ALIASES["_reverse"][lower_name]
-    
-    # Return original if no match found
-    return lower_name
+
+    # Check normalized aliases
+    if "_reverse" in ALIASES:
+        for alias, primary in ALIASES["_reverse"].items():
+            if normalize_text(alias) == normalized_name:
+                return primary
+
+    # Raw domain-as-command fallback
+    for key in APPS:
+        if key.replace("www.", "").startswith(lower_name):
+            return key
+
+    # Fuzzy match
+    for alias, primary in ALIASES.get("_reverse", {}).items():
+        if normalized_name in normalize_text(alias):
+            return primary
+        
+    # Fallback: If the input looks like a domain, treat it that way
+    if '.' in lower_name and not lower_name.startswith(('http://', 'https://')):
+        return lower_name  # Could be handled by smart_navigate or open_url
+
+    return app_name
+
 
 @mcp.tool()
 def launch_app(app_name: str) -> str:
     """Attempts to launch the given application or protocol."""
     # Resolve any aliases to the primary app name
     resolved_name = resolve_app_name(app_name)
+
+    logging.info(f"[launch_app] Input: '{app_name}' → Resolved: '{resolved_name}'")
     
     executables = APPS.get(resolved_name)
+
     if not executables:
+        # If it looks like a domain or navigation intent, try smart_navigate
+        if '.' in app_name or app_name.lower().startswith(('www.', 'http')):
+            return smart_navigate(app_name)
+
         # Try to find similar apps for helpful error message
         similar = find_similar_apps(app_name)
         if similar:
             return f"Application '{app_name}' not found. Did you mean: {', '.join(similar)}?"
         return f"Application '{app_name}' not found. Use 'list_apps' to see available apps."
+    
+    # Check for special 'url:' pseudo-apps
+    if isinstance(executables, list) and any(e.startswith("url:") for e in executables):
+        url = next((e[4:] for e in executables if e.startswith("url:")), None)
+        if url:
+            import webbrowser
+            try:
+                webbrowser.open(url)
+                return f"Opened browser to {url}"
+            except Exception as e:
+                return f"Failed to open browser: {e}"
 
     username = os.getenv('USERNAME', '') if platform.system() == "Windows" else os.getenv('USER', '')
     errors = []
@@ -267,6 +306,58 @@ def list_apps() -> str:
         result += ", ".join(apps)
     
     return result
+
+@mcp.tool()
+def smart_navigate(query: str) -> str:
+    """
+    Interprets user intent to open a website, even from vague commands like 'go to Reddit' or 'navigate to Amazon'.
+    If a domain is detected, it constructs a URL. Otherwise, it performs a fallback search.
+
+    Args:
+        query (str): The user intent (e.g., 'go to Reddit', 'navigate to irs.gov').
+
+    Returns:
+        str: Result of the navigation attempt.
+    """
+    import re
+
+    normalized = query.strip().lower()
+
+    # Remove common leading phrases
+    normalized = re.sub(r'^(go to|navigate to|open|launch)\s+', '', normalized)
+
+    # Remove polite endings (optional)
+    normalized = re.sub(r'( for me| please)$', '', normalized)
+
+    # Check for existing domain indicators
+    if re.search(r'\.(com|net|org|gov|edu|io|ai)(/|$)', normalized):
+        if not normalized.startswith("http"):
+            normalized = "https://" + normalized
+        try:
+            webbrowser.open(normalized)
+            return f"Opened {normalized}"
+        except Exception as e:
+            return f"Failed to open URL '{normalized}': {e}"
+
+    # If no domain, fallback to search
+    search_url = f"https://www.google.com/search?q={query}"
+    try:
+        webbrowser.open(search_url)
+        return f"Opened browser to search: {query}"
+    except Exception as e:
+        return f"Failed to perform search for '{query}': {e}"
+    
+@mcp.tool()
+def open_url(url: str) -> str:
+    """Launches the default web browser to the specified URL."""
+    import webbrowser
+    try:
+        if not url.startswith("http"):
+            url = "https://" + url
+        webbrowser.open(url)
+        return f"Opened {url}"
+    except Exception as e:
+        return f"Failed to open URL '{url}': {e}"
 
 @mcp.tool()
 def search_app(query: str) -> str:

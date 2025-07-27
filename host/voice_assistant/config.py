@@ -25,6 +25,8 @@ class Config:
     # === MODEL CONFIGURATION ===
     # Transcription
     stt_model: str
+
+    acknowledge_launches: bool  # Voice acknowledgment for app launches
     
     # Chat Models
     local_chat_model: str
@@ -109,6 +111,7 @@ class Config:
             min_speech_duration=float(os.getenv("MIN_SPEECH_DURATION", "0.8")),
             energy_threshold_multiplier=float(os.getenv("ENERGY_THRESHOLD_MULTIPLIER", "2.0")),
             max_energy_threshold=float(os.getenv("MAX_ENERGY_THRESHOLD", "0.5")),
+            acknowledge_launches=os.getenv("ACKNOWLEDGE_LAUNCHES", "true").lower() in ["true", "1", "yes", "on"],
             
             # === PROCESSING CONFIGURATION ===
             tool_timeout=float(os.getenv("TOOL_TIMEOUT", "30.0")),
