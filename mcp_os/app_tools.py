@@ -1,7 +1,6 @@
-# app_tools.py - FIXED VERSION - Backward compatible with both old and new config formats
+# app_tools.py - COMPLETE IMPLEMENTATION with PDF support
 """
-Application management tools for the MCP server
-Fixed to handle both old list format and new metadata format
+Application management tools for the MCP server with comprehensive file opening capabilities
 """
 
 import subprocess
@@ -16,7 +15,7 @@ import re
 from typing import Dict, List, Optional, Any, Union
 
 class AppToolsManager:
-    """Manages application launching and configuration"""
+    """Manages application launching and configuration with file opening support"""
     
     def __init__(self, config_path: str = "apps_config.json"):
         self.config_path = config_path
@@ -174,14 +173,43 @@ class AppToolsManager:
         
         return list(set(similar))[:5]  # Return up to 5 suggestions
     
-    def launch_app(self, app_name: str) -> str:
-        """Launch the given application or protocol"""
+    def get_app_config(self, app_name: str) -> Optional[Dict[str, Any]]:
+        """Get application configuration, returns dict format regardless of storage format"""
+        resolved_name = self.resolve_app_name(app_name)
+        app_config = self.apps.get(resolved_name)
+        
+        if not app_config:
+            return None
+        
+        # Convert to consistent dict format
+        if isinstance(app_config, list):
+            return {
+                "paths": app_config,
+                "description": f"{resolved_name} application",
+                "category": "unknown",
+                "keywords": [],
+                "supports_file_opening": False
+            }
+        elif isinstance(app_config, dict):
+            return app_config
+        else:
+            return {
+                "paths": [str(app_config)],
+                "description": f"{resolved_name} application",
+                "category": "unknown", 
+                "keywords": [],
+                "supports_file_opening": False
+            }
+    
+    def launch_app(self, app_name: str, file_path: str = None) -> str:
+        """Launch the given application or protocol, optionally with a file"""
         # Resolve any aliases to the primary app name
         resolved_name = self.resolve_app_name(app_name)
 
-        logging.info(f"[launch_app] Input: '{app_name}' → Resolved: '{resolved_name}'")
+        logging.info(f"[launch_app] Input: '{app_name}' → Resolved: '{resolved_name}'" + 
+                    (f" with file: '{file_path}'" if file_path else ""))
         
-        app_config = self.apps.get(resolved_name)
+        app_config = self.get_app_config(resolved_name)
 
         if not app_config:
             # If it looks like a domain or navigation intent, try smart_navigate
@@ -194,8 +222,8 @@ class AppToolsManager:
                 return f"Application '{app_name}' not found. Did you mean: {', '.join(similar)}?"
             return f"Application '{app_name}' not found. Use 'list_apps' to see available apps."
         
-        # FIXED: Extract paths from configuration (handles both old and new formats)
-        executables = self._extract_paths_from_app_config(app_config)
+        # Extract paths from configuration
+        executables = app_config.get('paths', [])
         
         # Check for special 'url:' pseudo-apps
         if isinstance(executables, list) and any(e.startswith("url:") for e in executables):
@@ -213,8 +241,11 @@ class AppToolsManager:
         # Handle macOS 'open' command format
         if platform.system() == "Darwin" and isinstance(executables, list) and len(executables) > 1 and executables[0] == "open":
             try:
-                subprocess.Popen(executables)
-                return f"Launched '{app_name}'"
+                cmd = list(executables)  # Copy the command
+                if file_path:
+                    cmd.append(file_path)
+                subprocess.Popen(cmd)
+                return f"Launched '{app_name}'" + (f" with {file_path}" if file_path else "")
             except Exception as e:
                 return f"Failed to launch '{app_name}': {str(e)}"
         
@@ -235,30 +266,42 @@ class AppToolsManager:
                         
                     # Handle 'start' commands (for Office apps)
                     elif path.startswith("start "):
-                        subprocess.Popen(path, shell=True)
-                        return f"Launched '{app_name}'"
+                        cmd = path
+                        if file_path:
+                            cmd += f' "{file_path}"'
+                        subprocess.Popen(cmd, shell=True)
+                        return f"Launched '{app_name}'" + (f" with {file_path}" if file_path else "")
                         
                     # Absolute path - check if it exists first
                     elif os.path.isabs(path):
                         if os.path.exists(path):
-                            os.startfile(path)
-                            return f"Launched '{app_name}' from {path}"
+                            cmd = [path]
+                            if file_path:
+                                cmd.append(file_path)
+                            subprocess.Popen(cmd)
+                            return f"Launched '{app_name}'" + (f" with {file_path}" if file_path else "")
                         else:
                             errors.append(f"Path not found: {path}")
                             continue
                             
                     # Try to find in PATH
                     elif shutil.which(path):
-                        subprocess.Popen([path], shell=False)
-                        return f"Launched '{app_name}'"
+                        cmd = [path]
+                        if file_path:
+                            cmd.append(file_path)
+                        subprocess.Popen(cmd, shell=False)
+                        return f"Launched '{app_name}'" + (f" with {file_path}" if file_path else "")
                     else:
                         errors.append(f"Not found in PATH: {path}")
                         
                 # Linux/Unix handling
                 else:
                     if shutil.which(path) or os.path.exists(path):
-                        subprocess.Popen([path], shell=False)
-                        return f"Launched '{app_name}'"
+                        cmd = [path]
+                        if file_path:
+                            cmd.append(file_path)
+                        subprocess.Popen(cmd, shell=False)
+                        return f"Launched '{app_name}'" + (f" with {file_path}" if file_path else "")
                     else:
                         errors.append(f"Not found: {path}")
                         
@@ -267,6 +310,81 @@ class AppToolsManager:
                 continue
 
         return f"Failed to launch '{app_name}'. Errors: {'; '.join(errors)}"
+    
+    def open_file_with_app(self, file_path: str, app_name: str = None) -> str:
+        """Open a specific file with an application (auto-detect app if not specified)"""
+        try:
+            # Expand path
+            if file_path.startswith("~/"):
+                file_path = os.path.expanduser(file_path)
+            
+            # Check if file exists
+            if not os.path.exists(file_path):
+                return f"File not found: {file_path}"
+            
+            # If no app specified, try to auto-detect based on file extension
+            if not app_name:
+                file_ext = pathlib.Path(file_path).suffix.lower()
+                
+                # Find apps that support this file extension
+                candidates = []
+                for app_key, app_config in self.apps.items():
+                    if isinstance(app_config, dict):
+                        supported_exts = app_config.get('file_extensions', [])
+                        if file_ext in supported_exts:
+                            candidates.append(app_key)
+                
+                if candidates:
+                    # Prefer specific apps for specific file types
+                    if file_ext == '.pdf' and 'acrobat' in candidates:
+                        app_name = 'acrobat'
+                    elif file_ext in ['.doc', '.docx'] and 'word' in candidates:
+                        app_name = 'word'
+                    elif file_ext in ['.xls', '.xlsx'] and 'excel' in candidates:
+                        app_name = 'excel'
+                    elif file_ext == '.txt' and 'notepad' in candidates:
+                        app_name = 'notepad'
+                    else:
+                        app_name = candidates[0]  # Use first available
+                else:
+                    # No specific app found, try system default
+                    if platform.system() == "Windows":
+                        os.startfile(file_path)
+                        return f"Opened {file_path} with system default application"
+                    else:
+                        subprocess.Popen(['open', file_path] if platform.system() == "Darwin" else ['xdg-open', file_path])
+                        return f"Opened {file_path} with system default application"
+            
+            # Launch the specified or detected app with the file
+            return self.launch_app(app_name, file_path)
+            
+        except Exception as e:
+            return f"Failed to open file: {e}"
+    
+    def find_pdf_files(self, directory_path: str = "~/Desktop") -> List[str]:
+        """Find PDF files in a directory - FIXED for OneDrive"""
+        try:
+            # Handle the OneDrive desktop issue
+            if directory_path == "~/Desktop":
+                # Try OneDrive desktop first
+                onedrive_desktop = os.path.expanduser("~/OneDrive/Desktop")
+                if os.path.exists(onedrive_desktop):
+                    directory_path = onedrive_desktop
+                else:
+                    directory_path = os.path.expanduser(directory_path)
+            elif directory_path.startswith("~/"):
+                directory_path = os.path.expanduser(directory_path)
+            
+            pdf_files = []
+            if os.path.exists(directory_path) and os.path.isdir(directory_path):
+                for file in os.listdir(directory_path):
+                    if file.lower().endswith('.pdf'):
+                        pdf_files.append(os.path.join(directory_path, file))
+            
+            return pdf_files
+        except Exception as e:
+            logging.error(f"Error finding PDF files: {e}")
+            return []
     
     def smart_navigate(self, query: str) -> str:
         """Interprets user intent to open a website"""
@@ -333,7 +451,7 @@ class AppToolsManager:
         unavailable = []
         
         for app_name, app_config in self.apps.items():
-            # FIXED: Extract paths from configuration
+            # Extract paths from configuration
             app_paths = self._extract_paths_from_app_config(app_config)
             exe = self.find_executable(app_paths)
             if exe:
@@ -360,9 +478,57 @@ def register_app_tools(mcp, app_manager: AppToolsManager):
     """Register all app-related tools with the MCP server"""
     
     @mcp.tool()
-    def launch_app(app_name: str) -> str:
-        """Attempts to launch the given application or protocol."""
-        return app_manager.launch_app(app_name)
+    def launch_app(app_name: str, file_path: str = None) -> str:
+        """Launch an application, optionally with a specific file.
+        
+        Args:
+            app_name: Name of the application to launch
+            file_path: Optional path to a file to open with the application
+        """
+        return app_manager.launch_app(app_name, file_path)
+    
+    @mcp.tool()
+    def open_file_with_app(file_path: str, app_name: str = None) -> str:
+        """Open a specific file with an application (auto-detects app if not specified).
+        
+        Args:
+            file_path: Path to the file to open
+            app_name: Optional application name (will auto-detect if not provided)
+        """
+        return app_manager.open_file_with_app(file_path, app_name)
+    
+    @mcp.tool()
+    def open_pdf_with_acrobat(file_path: str) -> str:
+        """Open a PDF file specifically with Adobe Acrobat/Reader.
+        
+        Args:
+            file_path: Path to the PDF file
+        """
+        return app_manager.open_file_with_app(file_path, "acrobat")
+    
+    @mcp.tool()
+    def find_and_open_first_pdf(directory_path: str = "~/Desktop", app_name: str = "acrobat") -> str:
+        """Find the first PDF file in a directory and open it with the specified application.
+        
+        Args:
+            directory_path: Directory to search for PDFs (default: ~/Desktop)
+            app_name: Application to use for opening (default: acrobat)
+        """
+        try:
+            pdf_files = app_manager.find_pdf_files(directory_path)
+            
+            if not pdf_files:
+                return f"No PDF files found in {directory_path}"
+            
+            # Sort files to get consistent "first" file
+            pdf_files.sort()
+            first_pdf = pdf_files[0]
+            
+            result = app_manager.open_file_with_app(first_pdf, app_name)
+            return f"Found {len(pdf_files)} PDF(s). Opening first one: {os.path.basename(first_pdf)}\n{result}"
+            
+        except Exception as e:
+            return f"Error finding or opening PDF: {e}"
     
     @mcp.tool()
     def list_apps() -> str:

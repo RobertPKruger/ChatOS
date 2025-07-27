@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "version": "2.0",
+    "version": "2.1",
     "description": "Application configuration with tool metadata",
     "supported_platforms": ["windows", "darwin", "linux"]
   },
@@ -48,6 +48,10 @@
   
   "aliases": {
     "windows": {
+      "acrobat": [
+        "acrobat", "adobe acrobat", "acrobat reader", "adobe reader", "pdf reader",
+        "reader", "pdf", "open pdf", "view pdf", "adobe", "acrobat dc", "acrobat pro"
+      ],
       "amazon.com": [
         "amazon", "go to amazon", "open amazon", "shop amazon", "shop on amazon","www.amazon.com"
       ],
@@ -60,8 +64,8 @@
       "nuggetnews.com": [
         "nugget news", "nuggetnews", "go to nugget news", "open nugget news", "www.nuggetnews.com"
       ],
-      "luciusshepard.com": [
-        "lucius shepard", "lucius shepherd", "luciusshepherd", "lucius-shepard", "go to lucius shepard", "open lucius shepard", "www.lucius-shepard.com"
+      "lucius-shepard.com": [
+        "lucius shepard", "lucius-shepard", "go to lucius shepard", "open lucius shepard", "www.lucius-shepard.com"
       ],
       "github.com": ["github", "go to github", "open github", "www.github.com"],
       "weather.com": ["weather", "go to weather", "open weather", "check weather", "weather.com"],
@@ -78,21 +82,8 @@
       "outlook": ["outlook", "email", "mail", "microsoft outlook"],
       "code": ["code", "vscode", "visual studio code", "vs code", "editor"],
       "gcai": [
-        "gcai", 
-        "gc ai", 
-        "gc_ai",
-        "g c a i",
-        "garratt-callahan ai", 
-        "garratt callahan ai", 
-        "garrattcallahan ai", 
-        "garrattcallahan-ai", 
-        "garratt-callahan-ai",
-        "gc artificial intelligence",
-        "garratt callahan artificial intelligence",
-        "chat ai",
-        "chatai",
-        "the gc ai",
-        "the gcai"
+        "gcai", "gc ai", "gc_ai", "g c a i", "garratt-callahan ai", "garratt callahan ai", 
+        "garrattcallahan ai", "garrattcallahan-ai", "garratt-callahan-ai"
       ]
     },
     
@@ -113,10 +104,31 @@
   
   "windows": {
     "acrobat": {
-      "paths": ["C:\\Program Files\\Adobe\\Acrobat DC\\Acrobat\\Acrobat.exe"],
+      "paths": [
+        "C:\\Program Files\\Adobe\\Acrobat DC\\Acrobat\\Acrobat.exe",
+        "C:\\Program Files (x86)\\Adobe\\Acrobat Reader DC\\Reader\\AcroRd32.exe",
+        "C:\\Program Files\\Adobe\\Acrobat Reader DC\\Reader\\AcroRd32.exe",
+        "C:\\Program Files (x86)\\Adobe\\Acrobat\\Acrobat.exe",
+        "start AcroRd32.exe",
+        "start Acrobat.exe"
+      ],
+      "description": "Adobe Acrobat/Reader PDF viewer",
+      "category": "productivity",
+      "keywords": ["pdf", "document", "adobe", "reader", "viewer"],
+      "file_extensions": [".pdf"],
+      "supports_file_opening": true
+    },
+    "adobe reader": {
+      "paths": [
+        "C:\\Program Files (x86)\\Adobe\\Acrobat Reader DC\\Reader\\AcroRd32.exe",
+        "C:\\Program Files\\Adobe\\Acrobat Reader DC\\Reader\\AcroRd32.exe",
+        "start AcroRd32.exe"
+      ],
       "description": "Adobe Acrobat Reader",
       "category": "productivity",
-      "keywords": ["pdf", "reader", "adobe"]
+      "keywords": ["pdf", "reader", "adobe"],
+      "file_extensions": [".pdf"],
+      "supports_file_opening": true
     },
     "amazon.com": {
       "paths": ["url:https://www.amazon.com"],
@@ -166,7 +178,7 @@
       "category": "websites", 
       "keywords": ["news", "information"]
     },
-    "luciusshepard.com": {
+    "lucius-shepard.com": {
       "paths": ["url:http://www.lucius-shepard.com/"],
       "description": "Lucius Shepard's website",
       "category": "websites",
@@ -176,7 +188,9 @@
       "paths": ["notepad.exe"],
       "description": "Simple text editor",
       "category": "productivity",
-      "keywords": ["text", "editor", "simple"]
+      "keywords": ["text", "editor", "simple"],
+      "file_extensions": [".txt", ".log", ".ini"],
+      "supports_file_opening": true
     },
     "calculator": {
       "paths": ["calc.exe", "calculator.exe"],
@@ -194,13 +208,15 @@
       "paths": ["explorer.exe"],
       "description": "Windows file explorer",
       "category": "system",
-      "keywords": ["files", "folders", "browse"]
+      "keywords": ["files", "folders", "browse"],
+      "supports_file_opening": true
     },
     "file explorer": {
       "paths": ["explorer.exe"],
       "description": "Windows file explorer",
       "category": "system",
-      "keywords": ["files", "folders", "browse"]
+      "keywords": ["files", "folders", "browse"],
+      "supports_file_opening": true
     },
     "cmd": {
       "paths": ["cmd.exe"],
@@ -294,7 +310,9 @@
       ],
       "description": "Microsoft Word",
       "category": "productivity",
-      "keywords": ["document", "text", "office", "microsoft"]
+      "keywords": ["document", "text", "office", "microsoft"],
+      "file_extensions": [".doc", ".docx", ".rtf"],
+      "supports_file_opening": true
     },
     "microsoft word": {
       "paths": [
@@ -304,7 +322,9 @@
       ],
       "description": "Microsoft Word",
       "category": "productivity",
-      "keywords": ["document", "text", "office", "microsoft"]
+      "keywords": ["document", "text", "office", "microsoft"],
+      "file_extensions": [".doc", ".docx", ".rtf"],
+      "supports_file_opening": true
     },
     "excel": {
       "paths": [
@@ -314,7 +334,9 @@
       ],
       "description": "Microsoft Excel",
       "category": "productivity",
-      "keywords": ["spreadsheet", "data", "office", "microsoft"]
+      "keywords": ["spreadsheet", "data", "office", "microsoft"],
+      "file_extensions": [".xls", ".xlsx", ".csv"],
+      "supports_file_opening": true
     },
     "microsoft excel": {
       "paths": [
@@ -324,7 +346,9 @@
       ],
       "description": "Microsoft Excel",
       "category": "productivity",
-      "keywords": ["spreadsheet", "data", "office", "microsoft"]
+      "keywords": ["spreadsheet", "data", "office", "microsoft"],
+      "file_extensions": [".xls", ".xlsx", ".csv"],
+      "supports_file_opening": true
     },
     "powerpoint": {
       "paths": [
@@ -334,7 +358,9 @@
       ],
       "description": "Microsoft PowerPoint",
       "category": "productivity",
-      "keywords": ["presentation", "slides", "office", "microsoft"]
+      "keywords": ["presentation", "slides", "office", "microsoft"],
+      "file_extensions": [".ppt", ".pptx"],
+      "supports_file_opening": true
     },
     "outlook": {
       "paths": [
@@ -381,7 +407,9 @@
       ],
       "description": "Visual Studio Code",
       "category": "development",
-      "keywords": ["editor", "code", "development", "microsoft"]
+      "keywords": ["editor", "code", "development", "microsoft"],
+      "file_extensions": [".js", ".py", ".html", ".css", ".json", ".md"],
+      "supports_file_opening": true
     },
     "vscode": {
       "paths": [
@@ -391,7 +419,9 @@
       ],
       "description": "Visual Studio Code",
       "category": "development",
-      "keywords": ["editor", "code", "development", "microsoft"]
+      "keywords": ["editor", "code", "development", "microsoft"],
+      "file_extensions": [".js", ".py", ".html", ".css", ".json", ".md"],
+      "supports_file_opening": true
     },
     "visual studio code": {
       "paths": [
@@ -401,7 +431,9 @@
       ],
       "description": "Visual Studio Code",
       "category": "development",
-      "keywords": ["editor", "code", "development", "microsoft"]
+      "keywords": ["editor", "code", "development", "microsoft"],
+      "file_extensions": [".js", ".py", ".html", ".css", ".json", ".md"],
+      "supports_file_opening": true
     }
   },
   
