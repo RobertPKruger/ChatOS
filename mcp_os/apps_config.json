@@ -1,4 +1,51 @@
 {
+  "metadata": {
+    "version": "2.0",
+    "description": "Application configuration with tool metadata",
+    "supported_platforms": ["windows", "darwin", "linux"]
+  },
+  
+  "tool_groups": {
+    "productivity": {
+      "description": "Office and productivity applications",
+      "apps": ["word", "excel", "powerpoint", "outlook", "notepad", "calculator"]
+    },
+    "development": {
+      "description": "Development tools and editors", 
+      "apps": ["code", "vscode", "visual studio code"]
+    },
+    "browsers": {
+      "description": "Web browsers",
+      "apps": ["chrome", "firefox", "edge", "safari"]
+    },
+    "system": {
+      "description": "System utilities",
+      "apps": ["explorer", "cmd", "powershell", "terminal", "task manager"]
+    },
+    "websites": {
+      "description": "Quick website access",
+      "apps": ["amazon.com", "github.com", "weather.com", "reddit.com", "duolingo.com"]
+    }
+  },
+  
+  "special_handlers": {
+    "url_prefix": {
+      "description": "Apps that open URLs in browser",
+      "marker": "url:",
+      "handler": "webbrowser.open"
+    },
+    "protocol_handlers": {
+      "description": "Windows protocol handlers",
+      "patterns": ["ms-*:"],
+      "platform": "windows"
+    },
+    "macos_apps": {
+      "description": "macOS application bundles", 
+      "patterns": ["open -a *"],
+      "platform": "darwin"
+    }
+  },
+  
   "aliases": {
     "windows": {
       "amazon.com": [
@@ -13,8 +60,8 @@
       "nuggetnews.com": [
         "nugget news", "nuggetnews", "go to nugget news", "open nugget news", "www.nuggetnews.com"
       ],
-      "lucius-shepard.com": [
-        "lucius shepard", "lucius-shepard", "go to lucius shepard", "open lucius shepard", "www.lucius-shepard.com"
+      "luciusshepard.com": [
+        "lucius shepard", "lucius shepherd", "luciusshepherd", "lucius-shepard", "go to lucius shepard", "open lucius shepard", "www.lucius-shepard.com"
       ],
       "github.com": ["github", "go to github", "open github", "www.github.com"],
       "weather.com": ["weather", "go to weather", "open weather", "check weather", "weather.com"],
@@ -63,140 +110,574 @@
       "code": ["code", "vscode", "visual studio code", "vs code", "editor"]
     }
   },
+  
   "windows": {
-    "amazon.com": ["url:https://www.amazon.com"],
-    "github.com": ["url:https://www.github.com"],
-    "weather.com": ["url:https://www.weather.com"],
-    "reddit.com": ["url:https://www.reddit.com"],
-    "noaa.gov": ["url:https://www.noaa.gov"],
-    "duolingo.com": ["url:https://www.duolingo.com"],
-    "robertpkruger.com": ["url:https://www.robertpkruger.com"],
-    "nuggetnews.com": ["url:https://www.nuggetnews.com"],
-    "http://www.lucius-shepard.com/": ["url:http://www.lucius-shepard.com/"],
-    "notepad": ["notepad.exe"],
-    "calculator": ["calc.exe", "calculator.exe"],
-    "calc": ["calc.exe", "calculator.exe"],
-    "explorer": ["explorer.exe"],
-    "file explorer": ["explorer.exe"],
-    "cmd": ["cmd.exe"],
-    "command prompt": ["cmd.exe"],
-    "powershell": ["powershell.exe", "pwsh.exe"],
-    "paint": ["mspaint.exe"],
-    "wordpad": ["wordpad.exe"],
-    "task manager": ["taskmgr.exe"],
-    "taskmgr": ["taskmgr.exe"],
-    "control panel": ["control.exe"],
-    "regedit": ["regedit.exe"],
-    "registry editor": ["regedit.exe"],
-    "settings": ["ms-settings:"],
-    "windows settings": ["ms-settings:"],
-    "gcai": ["C:\\Users\\comma\\Projects\\ChatOS\\mcp_os\\gcai_launcher.cmd"],
-    "garratt-callahan ai": ["C:\\Users\\comma\\Projects\\ChatOS\\mcp_os\\gcai_launcher.cmd"],
-    "word": [
-      "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
-      "winword.exe",
-      "start winword"
-    ],
-    "microsoft word": [
-      "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
-      "winword.exe",
-      "start winword"
-    ],
-    "excel": [
-      "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
-      "excel.exe",
-      "start excel"
-    ],
-    "microsoft excel": [
-      "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
-      "excel.exe",
-      "start excel"
-    ],
-    "powerpoint": [
-      "C:\\Program Files\\Microsoft Office\\root\\Office16\\POWERPNT.EXE",
-      "powerpnt.exe",
-      "start powerpnt"
-    ],
-    "outlook": [
-      "C:\\Program Files\\Microsoft Office\\root\\Office16\\OUTLOOK.EXE",
-      "outlook.exe",
-      "start outlook"
-    ],
-    "chrome": [
-      "chrome.exe",
-      "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-      "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-      "start chrome"
-    ],
-    "firefox": [
-      "firefox.exe",
-      "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
-      "C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe"
-    ],
-    "edge": ["msedge.exe", "microsoftedge.exe", "start msedge"],
-    "code": [
-      "code.exe",
-      "C:\\Users\\{username}\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
-      "C:\\Program Files\\Microsoft VS Code\\Code.exe"
-    ],
-    "vscode": [
-      "code.exe",
-      "C:\\Users\\{username}\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
-      "C:\\Program Files\\Microsoft VS Code\\Code.exe"
-    ],
-    "visual studio code": [
-      "code.exe",
-      "C:\\Users\\{username}\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
-      "C:\\Program Files\\Microsoft VS Code\\Code.exe"
-    ]
+    "acrobat": {
+      "paths": ["C:\\Program Files\\Adobe\\Acrobat DC\\Acrobat\\Acrobat.exe"],
+      "description": "Adobe Acrobat Reader",
+      "category": "productivity",
+      "keywords": ["pdf", "reader", "adobe"]
+    },
+    "amazon.com": {
+      "paths": ["url:https://www.amazon.com"],
+      "description": "Amazon shopping website",
+      "category": "websites",
+      "keywords": ["shopping", "ecommerce", "online store"]
+    },
+    "github.com": {
+      "paths": ["url:https://www.github.com"],
+      "description": "GitHub code repository",
+      "category": "websites", 
+      "keywords": ["code", "development", "git", "repository"]
+    },
+    "weather.com": {
+      "paths": ["url:https://www.weather.com"],
+      "description": "Weather forecasts and information",
+      "category": "websites",
+      "keywords": ["weather", "forecast", "climate"]
+    },
+    "reddit.com": {
+      "paths": ["url:https://www.reddit.com"],
+      "description": "Social news aggregation",
+      "category": "websites",
+      "keywords": ["social", "news", "discussion"]
+    },
+    "noaa.gov": {
+      "paths": ["url:https://www.noaa.gov"],
+      "description": "National Oceanic and Atmospheric Administration",
+      "category": "websites", 
+      "keywords": ["weather", "government", "science"]
+    },
+    "duolingo.com": {
+      "paths": ["url:https://www.duolingo.com"],
+      "description": "Language learning platform",
+      "category": "websites",
+      "keywords": ["education", "language", "learning"]
+    },
+    "robertpkruger.com": {
+      "paths": ["url:https://www.robertpkruger.com"],
+      "description": "Robert P Kruger's website",
+      "category": "websites",
+      "keywords": ["personal", "portfolio"]
+    },
+    "nuggetnews.com": {
+      "paths": ["url:https://www.nuggetnews.com"],
+      "description": "Nugget News website",
+      "category": "websites", 
+      "keywords": ["news", "information"]
+    },
+    "luciusshepard.com": {
+      "paths": ["url:http://www.lucius-shepard.com/"],
+      "description": "Lucius Shepard's website",
+      "category": "websites",
+      "keywords": ["author", "literature", "writing"]
+    },
+    "notepad": {
+      "paths": ["notepad.exe"],
+      "description": "Simple text editor",
+      "category": "productivity",
+      "keywords": ["text", "editor", "simple"]
+    },
+    "calculator": {
+      "paths": ["calc.exe", "calculator.exe"],
+      "description": "Windows calculator",
+      "category": "productivity", 
+      "keywords": ["math", "calculation", "utility"]
+    },
+    "calc": {
+      "paths": ["calc.exe", "calculator.exe"],
+      "description": "Windows calculator (alias)",
+      "category": "productivity",
+      "keywords": ["math", "calculation", "utility"]
+    },
+    "explorer": {
+      "paths": ["explorer.exe"],
+      "description": "Windows file explorer",
+      "category": "system",
+      "keywords": ["files", "folders", "browse"]
+    },
+    "file explorer": {
+      "paths": ["explorer.exe"],
+      "description": "Windows file explorer",
+      "category": "system",
+      "keywords": ["files", "folders", "browse"]
+    },
+    "cmd": {
+      "paths": ["cmd.exe"],
+      "description": "Command prompt",
+      "category": "system",
+      "keywords": ["command", "terminal", "console"]
+    },
+    "command prompt": {
+      "paths": ["cmd.exe"],
+      "description": "Command prompt",
+      "category": "system", 
+      "keywords": ["command", "terminal", "console"]
+    },
+    "powershell": {
+      "paths": ["powershell.exe", "pwsh.exe"],
+      "description": "PowerShell terminal",
+      "category": "system",
+      "keywords": ["command", "terminal", "scripting"]
+    },
+    "paint": {
+      "paths": ["mspaint.exe"],
+      "description": "Microsoft Paint",
+      "category": "productivity",
+      "keywords": ["graphics", "drawing", "image"]
+    },
+    "wordpad": {
+      "paths": ["wordpad.exe"],
+      "description": "Rich text editor",
+      "category": "productivity",
+      "keywords": ["text", "editor", "rich"]
+    },
+    "task manager": {
+      "paths": ["taskmgr.exe"],
+      "description": "Windows task manager",
+      "category": "system",
+      "keywords": ["processes", "performance", "system"]
+    },
+    "taskmgr": {
+      "paths": ["taskmgr.exe"],
+      "description": "Windows task manager",
+      "category": "system",
+      "keywords": ["processes", "performance", "system"]
+    },
+    "control panel": {
+      "paths": ["control.exe"],
+      "description": "Windows control panel",
+      "category": "system",
+      "keywords": ["settings", "configuration", "system"]
+    },
+    "regedit": {
+      "paths": ["regedit.exe"],
+      "description": "Registry editor",
+      "category": "system",
+      "keywords": ["registry", "advanced", "system"]
+    },
+    "registry editor": {
+      "paths": ["regedit.exe"],
+      "description": "Registry editor",
+      "category": "system",
+      "keywords": ["registry", "advanced", "system"]
+    },
+    "settings": {
+      "paths": ["ms-settings:"],
+      "description": "Windows settings",
+      "category": "system",
+      "keywords": ["settings", "configuration", "modern"]
+    },
+    "windows settings": {
+      "paths": ["ms-settings:"],
+      "description": "Windows settings",
+      "category": "system",
+      "keywords": ["settings", "configuration", "modern"]
+    },
+    "gcai": {
+      "paths": ["C:\\Users\\comma\\Projects\\ChatOS\\mcp_os\\gcai_launcher.cmd"],
+      "description": "Garratt-Callahan AI assistant",
+      "category": "productivity",
+      "keywords": ["ai", "assistant", "chat"]
+    },
+    "garratt-callahan ai": {
+      "paths": ["C:\\Users\\comma\\Projects\\ChatOS\\mcp_os\\gcai_launcher.cmd"],
+      "description": "Garratt-Callahan AI assistant",
+      "category": "productivity",
+      "keywords": ["ai", "assistant", "chat"]
+    },
+    "word": {
+      "paths": [
+        "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+        "winword.exe",
+        "start winword"
+      ],
+      "description": "Microsoft Word",
+      "category": "productivity",
+      "keywords": ["document", "text", "office", "microsoft"]
+    },
+    "microsoft word": {
+      "paths": [
+        "C:\\Program Files\\Microsoft Office\\root\\Office16\\WINWORD.EXE",
+        "winword.exe",
+        "start winword"
+      ],
+      "description": "Microsoft Word",
+      "category": "productivity",
+      "keywords": ["document", "text", "office", "microsoft"]
+    },
+    "excel": {
+      "paths": [
+        "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+        "excel.exe",
+        "start excel"
+      ],
+      "description": "Microsoft Excel",
+      "category": "productivity",
+      "keywords": ["spreadsheet", "data", "office", "microsoft"]
+    },
+    "microsoft excel": {
+      "paths": [
+        "C:\\Program Files\\Microsoft Office\\root\\Office16\\EXCEL.EXE",
+        "excel.exe",
+        "start excel"
+      ],
+      "description": "Microsoft Excel",
+      "category": "productivity",
+      "keywords": ["spreadsheet", "data", "office", "microsoft"]
+    },
+    "powerpoint": {
+      "paths": [
+        "C:\\Program Files\\Microsoft Office\\root\\Office16\\POWERPNT.EXE",
+        "powerpnt.exe",
+        "start powerpnt"
+      ],
+      "description": "Microsoft PowerPoint",
+      "category": "productivity",
+      "keywords": ["presentation", "slides", "office", "microsoft"]
+    },
+    "outlook": {
+      "paths": [
+        "C:\\Program Files\\Microsoft Office\\root\\Office16\\OUTLOOK.EXE",
+        "outlook.exe",
+        "start outlook"
+      ],
+      "description": "Microsoft Outlook",
+      "category": "productivity",
+      "keywords": ["email", "calendar", "office", "microsoft"]
+    },
+    "chrome": {
+      "paths": [
+        "chrome.exe",
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        "start chrome"
+      ],
+      "description": "Google Chrome browser",
+      "category": "browsers",
+      "keywords": ["browser", "web", "internet", "google"]
+    },
+    "firefox": {
+      "paths": [
+        "firefox.exe",
+        "C:\\Program Files\\Mozilla Firefox\\firefox.exe",
+        "C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe"
+      ],
+      "description": "Mozilla Firefox browser",
+      "category": "browsers",
+      "keywords": ["browser", "web", "internet", "mozilla"]
+    },
+    "edge": {
+      "paths": ["msedge.exe", "microsoftedge.exe", "start msedge"],
+      "description": "Microsoft Edge browser",
+      "category": "browsers",
+      "keywords": ["browser", "web", "internet", "microsoft"]
+    },
+    "code": {
+      "paths": [
+        "code.exe",
+        "C:\\Users\\{username}\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+        "C:\\Program Files\\Microsoft VS Code\\Code.exe"
+      ],
+      "description": "Visual Studio Code",
+      "category": "development",
+      "keywords": ["editor", "code", "development", "microsoft"]
+    },
+    "vscode": {
+      "paths": [
+        "code.exe",
+        "C:\\Users\\{username}\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+        "C:\\Program Files\\Microsoft VS Code\\Code.exe"
+      ],
+      "description": "Visual Studio Code",
+      "category": "development",
+      "keywords": ["editor", "code", "development", "microsoft"]
+    },
+    "visual studio code": {
+      "paths": [
+        "code.exe",
+        "C:\\Users\\{username}\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe",
+        "C:\\Program Files\\Microsoft VS Code\\Code.exe"
+      ],
+      "description": "Visual Studio Code",
+      "category": "development",
+      "keywords": ["editor", "code", "development", "microsoft"]
+    }
   },
+  
   "darwin": {
-    "finder": ["open", "-a", "Finder"],
-    "safari": ["open", "-a", "Safari"],
-    "chrome": ["open", "-a", "Google Chrome"],
-    "firefox": ["open", "-a", "Firefox"],
-    "terminal": ["open", "-a", "Terminal"],
-    "calculator": ["open", "-a", "Calculator"],
-    "calendar": ["open", "-a", "Calendar"],
-    "mail": ["open", "-a", "Mail"],
-    "messages": ["open", "-a", "Messages"],
-    "notes": ["open", "-a", "Notes"],
-    "preview": ["open", "-a", "Preview"],
-    "system preferences": ["open", "-a", "System Preferences"],
-    "system settings": ["open", "-a", "System Settings"],
-    "activity monitor": ["open", "-a", "Activity Monitor"],
-    "word": ["/Applications/Microsoft Word.app/Contents/MacOS/Microsoft Word", "open", "-a", "Microsoft Word"],
-    "microsoft word": ["/Applications/Microsoft Word.app/Contents/MacOS/Microsoft Word", "open", "-a", "Microsoft Word"],
-    "excel": ["/Applications/Microsoft Excel.app/Contents/MacOS/Microsoft Excel", "open", "-a", "Microsoft Excel"],
-    "microsoft excel": ["/Applications/Microsoft Excel.app/Contents/MacOS/Microsoft Excel", "open", "-a", "Microsoft Excel"],
-    "powerpoint": ["/Applications/Microsoft PowerPoint.app/Contents/MacOS/Microsoft PowerPoint", "open", "-a", "Microsoft PowerPoint"],
-    "outlook": ["/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook", "open", "-a", "Microsoft Outlook"],
-    "code": ["/Applications/Visual Studio Code.app/Contents/MacOS/Electron", "open", "-a", "Visual Studio Code"],
-    "vscode": ["/Applications/Visual Studio Code.app/Contents/MacOS/Electron", "open", "-a", "Visual Studio Code"],
-    "visual studio code": ["/Applications/Visual Studio Code.app/Contents/MacOS/Electron", "open", "-a", "Visual Studio Code"],
-    "xcode": ["open", "-a", "Xcode"],
-    "slack": ["open", "-a", "Slack"],
-    "spotify": ["open", "-a", "Spotify"]
+    "finder": {
+      "paths": ["open", "-a", "Finder"],
+      "description": "macOS file manager",
+      "category": "system",
+      "keywords": ["files", "folders", "browse"]
+    },
+    "safari": {
+      "paths": ["open", "-a", "Safari"],
+      "description": "Safari web browser",
+      "category": "browsers",
+      "keywords": ["browser", "web", "internet", "apple"]
+    },
+    "chrome": {
+      "paths": ["open", "-a", "Google Chrome"],
+      "description": "Google Chrome browser",
+      "category": "browsers",
+      "keywords": ["browser", "web", "internet", "google"]
+    },
+    "firefox": {
+      "paths": ["open", "-a", "Firefox"],
+      "description": "Mozilla Firefox browser",
+      "category": "browsers",
+      "keywords": ["browser", "web", "internet", "mozilla"]
+    },
+    "terminal": {
+      "paths": ["open", "-a", "Terminal"],
+      "description": "macOS terminal",
+      "category": "system",
+      "keywords": ["command", "terminal", "console"]
+    },
+    "calculator": {
+      "paths": ["open", "-a", "Calculator"],
+      "description": "macOS calculator",
+      "category": "productivity",
+      "keywords": ["math", "calculation", "utility"]
+    },
+    "calendar": {
+      "paths": ["open", "-a", "Calendar"],
+      "description": "macOS calendar",
+      "category": "productivity",
+      "keywords": ["calendar", "schedule", "events"]
+    },
+    "mail": {
+      "paths": ["open", "-a", "Mail"],
+      "description": "macOS mail client",
+      "category": "productivity",
+      "keywords": ["email", "mail", "communication"]
+    },
+    "messages": {
+      "paths": ["open", "-a", "Messages"],
+      "description": "macOS messages",
+      "category": "productivity",
+      "keywords": ["messages", "chat", "communication"]
+    },
+    "notes": {
+      "paths": ["open", "-a", "Notes"],
+      "description": "macOS notes",
+      "category": "productivity",
+      "keywords": ["notes", "text", "memo"]
+    },
+    "preview": {
+      "paths": ["open", "-a", "Preview"],
+      "description": "macOS preview",
+      "category": "productivity",
+      "keywords": ["preview", "pdf", "images"]
+    },
+    "system preferences": {
+      "paths": ["open", "-a", "System Preferences"],
+      "description": "macOS system preferences",
+      "category": "system",
+      "keywords": ["settings", "preferences", "system"]
+    },
+    "system settings": {
+      "paths": ["open", "-a", "System Settings"],
+      "description": "macOS system settings",
+      "category": "system",
+      "keywords": ["settings", "preferences", "system"]
+    },
+    "activity monitor": {
+      "paths": ["open", "-a", "Activity Monitor"],
+      "description": "macOS activity monitor",
+      "category": "system",
+      "keywords": ["processes", "performance", "system"]
+    },
+    "word": {
+      "paths": ["/Applications/Microsoft Word.app/Contents/MacOS/Microsoft Word", "open", "-a", "Microsoft Word"],
+      "description": "Microsoft Word",
+      "category": "productivity",
+      "keywords": ["document", "text", "office", "microsoft"]
+    },
+    "microsoft word": {
+      "paths": ["/Applications/Microsoft Word.app/Contents/MacOS/Microsoft Word", "open", "-a", "Microsoft Word"],
+      "description": "Microsoft Word",
+      "category": "productivity",
+      "keywords": ["document", "text", "office", "microsoft"]
+    },
+    "excel": {
+      "paths": ["/Applications/Microsoft Excel.app/Contents/MacOS/Microsoft Excel", "open", "-a", "Microsoft Excel"],
+      "description": "Microsoft Excel",
+      "category": "productivity",
+      "keywords": ["spreadsheet", "data", "office", "microsoft"]
+    },
+    "microsoft excel": {
+      "paths": ["/Applications/Microsoft Excel.app/Contents/MacOS/Microsoft Excel", "open", "-a", "Microsoft Excel"],
+      "description": "Microsoft Excel",
+      "category": "productivity",
+      "keywords": ["spreadsheet", "data", "office", "microsoft"]
+    },
+    "powerpoint": {
+      "paths": ["/Applications/Microsoft PowerPoint.app/Contents/MacOS/Microsoft PowerPoint", "open", "-a", "Microsoft PowerPoint"],
+      "description": "Microsoft PowerPoint",
+      "category": "productivity",
+      "keywords": ["presentation", "slides", "office", "microsoft"]
+    },
+    "outlook": {
+      "paths": ["/Applications/Microsoft Outlook.app/Contents/MacOS/Microsoft Outlook", "open", "-a", "Microsoft Outlook"],
+      "description": "Microsoft Outlook",
+      "category": "productivity",
+      "keywords": ["email", "calendar", "office", "microsoft"]
+    },
+    "code": {
+      "paths": ["/Applications/Visual Studio Code.app/Contents/MacOS/Electron", "open", "-a", "Visual Studio Code"],
+      "description": "Visual Studio Code",
+      "category": "development",
+      "keywords": ["editor", "code", "development", "microsoft"]
+    },
+    "vscode": {
+      "paths": ["/Applications/Visual Studio Code.app/Contents/MacOS/Electron", "open", "-a", "Visual Studio Code"],
+      "description": "Visual Studio Code",
+      "category": "development",
+      "keywords": ["editor", "code", "development", "microsoft"]
+    },
+    "visual studio code": {
+      "paths": ["/Applications/Visual Studio Code.app/Contents/MacOS/Electron", "open", "-a", "Visual Studio Code"],
+      "description": "Visual Studio Code",
+      "category": "development",
+      "keywords": ["editor", "code", "development", "microsoft"]
+    },
+    "xcode": {
+      "paths": ["open", "-a", "Xcode"],
+      "description": "Apple Xcode IDE",
+      "category": "development",
+      "keywords": ["ide", "development", "apple", "ios"]
+    },
+    "slack": {
+      "paths": ["open", "-a", "Slack"],
+      "description": "Slack communication",
+      "category": "productivity",
+      "keywords": ["communication", "team", "chat"]
+    },
+    "spotify": {
+      "paths": ["open", "-a", "Spotify"],
+      "description": "Spotify music streaming",
+      "category": "entertainment",
+      "keywords": ["music", "streaming", "audio"]
+    }
   },
+  
   "linux": {
-    "terminal": ["gnome-terminal", "konsole", "xterm", "terminator"],
-    "firefox": ["firefox", "/usr/bin/firefox", "/snap/bin/firefox"],
-    "chrome": ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
-    "calculator": ["gnome-calculator", "kcalc", "xcalc", "calc"],
-    "text editor": ["gedit", "kate", "mousepad", "leafpad", "nano"],
-    "file manager": ["nautilus", "dolphin", "thunar", "pcmanfm", "nemo"],
-    "system monitor": ["gnome-system-monitor", "ksysguard", "htop", "top"],
-    "settings": ["gnome-control-center", "systemsettings", "unity-control-center"],
-    "libreoffice writer": ["libreoffice", "--writer", "lowriter"],
-    "libreoffice calc": ["libreoffice", "--calc", "localc"],
-    "libreoffice impress": ["libreoffice", "--impress", "loimpress"],
-    "code": ["code", "/usr/bin/code", "/snap/bin/code", "/usr/share/code/code"],
-    "vscode": ["code", "/usr/bin/code", "/snap/bin/code", "/usr/share/code/code"],
-    "visual studio code": ["code", "/usr/bin/code", "/snap/bin/code", "/usr/share/code/code"],
-    "thunderbird": ["thunderbird", "/usr/bin/thunderbird"],
-    "gimp": ["gimp", "/usr/bin/gimp"],
-    "vlc": ["vlc", "/usr/bin/vlc", "/snap/bin/vlc"],
-    "slack": ["slack", "/usr/bin/slack", "/snap/bin/slack"],
-    "discord": ["discord", "/usr/bin/discord", "/snap/bin/discord"]
+    "terminal": {
+      "paths": ["gnome-terminal", "konsole", "xterm", "terminator"],
+      "description": "Linux terminal",
+      "category": "system",
+      "keywords": ["command", "terminal", "console"]
+    },
+    "firefox": {
+      "paths": ["firefox", "/usr/bin/firefox", "/snap/bin/firefox"],
+      "description": "Mozilla Firefox browser",
+      "category": "browsers",
+      "keywords": ["browser", "web", "internet", "mozilla"]
+    },
+    "chrome": {
+      "paths": ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"],
+      "description": "Google Chrome browser",
+      "category": "browsers",
+      "keywords": ["browser", "web", "internet", "google"]
+    },
+    "calculator": {
+      "paths": ["gnome-calculator", "kcalc", "xcalc", "calc"],
+      "description": "Linux calculator",
+      "category": "productivity",
+      "keywords": ["math", "calculation", "utility"]
+    },
+    "text editor": {
+      "paths": ["gedit", "kate", "mousepad", "leafpad", "nano"],
+      "description": "Text editor",
+      "category": "productivity",
+      "keywords": ["text", "editor", "simple"]
+    },
+    "file manager": {
+      "paths": ["nautilus", "dolphin", "thunar", "pcmanfm", "nemo"],
+      "description": "File manager",
+      "category": "system",
+      "keywords": ["files", "folders", "browse"]
+    },
+    "system monitor": {
+      "paths": ["gnome-system-monitor", "ksysguard", "htop", "top"],
+      "description": "System monitor",
+      "category": "system",
+      "keywords": ["processes", "performance", "system"]
+    },
+    "settings": {
+      "paths": ["gnome-control-center", "systemsettings", "unity-control-center"],
+      "description": "System settings",
+      "category": "system",
+      "keywords": ["settings", "configuration", "system"]
+    },
+    "libreoffice writer": {
+      "paths": ["libreoffice", "--writer", "lowriter"],
+      "description": "LibreOffice Writer",
+      "category": "productivity",
+      "keywords": ["document", "text", "office", "libre"]
+    },
+    "libreoffice calc": {
+      "paths": ["libreoffice", "--calc", "localc"],
+      "description": "LibreOffice Calc",
+      "category": "productivity",
+      "keywords": ["spreadsheet", "data", "office", "libre"]
+    },
+    "libreoffice impress": {
+      "paths": ["libreoffice", "--impress", "loimpress"],
+      "description": "LibreOffice Impress",
+      "category": "productivity",
+      "keywords": ["presentation", "slides", "office", "libre"]
+    },
+    "code": {
+      "paths": ["code", "/usr/bin/code", "/snap/bin/code", "/usr/share/code/code"],
+      "description": "Visual Studio Code",
+      "category": "development",
+      "keywords": ["editor", "code", "development", "microsoft"]
+    },
+    "vscode": {
+      "paths": ["code", "/usr/bin/code", "/snap/bin/code", "/usr/share/code/code"],
+      "description": "Visual Studio Code",
+      "category": "development",
+      "keywords": ["editor", "code", "development", "microsoft"]
+    },
+    "visual studio code": {
+      "paths": ["code", "/usr/bin/code", "/snap/bin/code", "/usr/share/code/code"],
+      "description": "Visual Studio Code",
+      "category": "development",
+      "keywords": ["editor", "code", "development", "microsoft"]
+    },
+    "thunderbird": {
+      "paths": ["thunderbird", "/usr/bin/thunderbird"],
+      "description": "Mozilla Thunderbird email",
+      "category": "productivity",
+      "keywords": ["email", "mail", "mozilla"]
+    },
+    "gimp": {
+      "paths": ["gimp", "/usr/bin/gimp"],
+      "description": "GIMP image editor",
+      "category": "productivity",
+      "keywords": ["graphics", "image", "editor"]
+    },
+    "vlc": {
+      "paths": ["vlc", "/usr/bin/vlc", "/snap/bin/vlc"],
+      "description": "VLC media player",
+      "category": "entertainment",
+      "keywords": ["video", "media", "player"]
+    },
+    "slack": {
+      "paths": ["slack", "/usr/bin/slack", "/snap/bin/slack"],
+      "description": "Slack communication",
+      "category": "productivity",
+      "keywords": ["communication", "team", "chat"]
+    },
+    "discord": {
+      "paths": ["discord", "/usr/bin/discord", "/snap/bin/discord"],
+      "description": "Discord communication",
+      "category": "productivity",
+      "keywords": ["communication", "gaming", "chat"]
+    }
   }
 }

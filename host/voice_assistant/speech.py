@@ -1,6 +1,6 @@
-# voice_assistant/speech.py
+# voice_assistant/speech.py - FIXED VERSION with acknowledgement exceptions
 """
-Speech-to-text and text-to-speech processing
+Speech-to-text and text-to-speech processing with improved validation
 """
 
 import asyncio
@@ -25,8 +25,72 @@ from .utils import retry_with_backoff
 
 logger = logging.getLogger(__name__)
 
+# Valid acknowledgements and short responses that should always be accepted
+VALID_ACKNOWLEDGEMENTS = {
+    # Basic responses
+    "yes", "yeah", "yep", "yup", "yes sir", "yes ma'am", "absolutely", "definitely", 
+    "sure", "ok", "okay", "alright", "all right", "right", "correct", "true",
+    "no", "nope", "nah", "no way", "not really", "negative", "false", "wrong",
+    
+    # Politeness
+    "please", "thank you", "thanks", "thank you very much", "much appreciated",
+    "you're welcome", "no problem", "no worries", "my pleasure", "anytime",
+    "sorry", "excuse me", "pardon me", "my apologies", "i apologize",
+    
+    # Confirmations
+    "i agree", "agreed", "sounds good", "that works", "perfect", "excellent",
+    "great", "awesome", "wonderful", "fantastic", "amazing", "brilliant",
+    "i understand", "understood", "got it", "i see", "makes sense", "i get it",
+    
+    # Directions and commands
+    "stop", "wait", "hold on", "pause", "continue", "go ahead", "proceed",
+    "start", "begin", "end", "finish", "done", "complete", "next", "previous",
+    "up", "down", "left", "right", "back", "forward", "here", "there",
+    
+    # Questions
+    "what", "where", "when", "why", "how", "who", "which", "whose",
+    "what's that", "what is that", "who's that", "who is that",
+    "how much", "how many", "how long", "how far", "how often",
+    
+    # Greetings
+    "hello", "hi", "hey", "good morning", "good afternoon", "good evening",
+    "good night", "goodbye", "bye", "see you later", "talk to you later",
+    
+    # Help and assistance
+    "help", "help me", "i need help", "can you help", "assist me",
+    "what can you do", "what do you do", "how do you work",
+    
+    # Emotional responses
+    "wow", "cool", "nice", "good", "bad", "terrible", "horrible", "lovely",
+    "interesting", "boring", "exciting", "scary", "funny", "weird", "strange",
+    
+    # Numbers and basic words
+    "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+    "first", "second", "third", "last", "final", "initial", "original",
+    
+    # Actions
+    "show me", "tell me", "give me", "find", "search", "look", "check",
+    "open", "close", "start", "stop", "play", "pause", "skip", "repeat",
+    
+    # Common short phrases
+    "i think", "i believe", "i know", "i don't know", "i'm not sure",
+    "maybe", "perhaps", "possibly", "probably", "definitely not",
+    "of course", "certainly", "obviously", "clearly", "exactly",
+    
+    # Technical/computer terms
+    "computer", "laptop", "phone", "tablet", "screen", "monitor", "keyboard",
+    "mouse", "internet", "wifi", "bluetooth", "usb", "file", "folder",
+    
+    # Time references
+    "now", "later", "soon", "today", "tomorrow", "yesterday", "tonight",
+    "morning", "afternoon", "evening", "night", "minute", "hour", "day"
+}
+
+# Convert to lowercase set for faster lookup
+VALID_ACKNOWLEDGEMENTS_SET = {phrase.lower() for phrase in VALID_ACKNOWLEDGEMENTS}
+
 async def transcribe_audio(audio_buffer: io.BytesIO, state: AssistantState, config, check_stuck_phrase: bool = False) -> Optional[str]:
-    """Transcribe audio with retry logic and validation"""
+    """Transcribe audio with retry logic and improved validation"""
     async def do_transcribe():
         try:
             # Force English language hint
@@ -47,17 +111,41 @@ async def transcribe_audio(audio_buffer: io.BytesIO, state: AssistantState, conf
         if check_stuck_phrase:
             return text
         
-        # Validate transcription
+        # Validate transcription with acknowledgement exceptions
         if not text or len(text.strip()) == 0:
             logger.info("Empty transcription, ignoring")
             return None
+        
+        # Clean and normalize the text
+        clean_text = text.strip().lower()
+        normalized_text = clean_text.replace(",", "").replace(".", "").replace("?", "").replace("!", "")
+        
+        # FIRST: Check if it's a valid acknowledgement or short response
+        if normalized_text in VALID_ACKNOWLEDGEMENTS_SET:
+            logger.info(f"Valid acknowledgement detected: {text}")
+            return text
+        
+        # SECOND: Check if any words in the text are valid acknowledgements
+        words = normalized_text.split()
+        if len(words) <= 3:  # Short phrases only
+            for word in words:
+                if word in VALID_ACKNOWLEDGEMENTS_SET:
+                    logger.info(f"Contains valid acknowledgement word: {text}")
+                    return text
+        
+        # THIRD: Check for short but meaningful combinations
+        if len(words) <= 2:
+            # Allow combinations like "yes please", "no thanks", "ok sure", etc.
+            word_set = set(words)
+            if any(word in VALID_ACKNOWLEDGEMENTS_SET for word in word_set):
+                logger.info(f"Short meaningful phrase: {text}")
+                return text
         
         # Enhanced noise patterns - common false positives
         noise_patterns = [
             # Common STT artifacts
             "Thank you.", "Thanks for watching!", "Bye!", "Thanks.", 
             "Thank you for watching.", "Please subscribe.", "Bye-bye",
-            "Hello?", "Yeah.", "Uh-huh.", "Mm-hmm.", "Okay.", "Alright.",
             
             # Music/media artifacts  
             "[Music]", "[Applause]", "[Laughter]", "[MUSIC]", "[music]",
@@ -69,7 +157,7 @@ async def transcribe_audio(audio_buffer: io.BytesIO, state: AssistantState, conf
             "Merci", "Bonjour", "Au revoir", "Gracias", "Hola",
             
             # Single characters/punctuation
-            "you", "the", "a", ".", ",", "!", "?", "-", "...",
+            "the", "a", ".", ",", "!", "?", "-", "...",
             
             # Common background noise transcriptions
             "Shh", "Shh.", "Shhh", "Hmm", "Hmm.", "Hm",
@@ -80,48 +168,58 @@ async def transcribe_audio(audio_buffer: io.BytesIO, state: AssistantState, conf
             "Transcribed by", "Subtitles by", "Captions by"
         ]
         
-        # Check exact matches (case-insensitive)
-        if text.strip().lower() in [p.lower() for p in noise_patterns]:
-            logger.info(f"Ignoring noise transcription: {text}")
-            return None
+        # Check exact matches (case-insensitive) - but skip if it's a valid acknowledgement
+        if clean_text in [p.lower() for p in noise_patterns]:
+            # Double-check it's not actually a valid response
+            if clean_text not in VALID_ACKNOWLEDGEMENTS_SET:
+                logger.info(f"Ignoring noise transcription: {text}")
+                return None
         
         # Check if it's mostly punctuation or special characters
         alpha_chars = sum(c.isalpha() for c in text)
-        if alpha_chars < len(text) * 0.5:  # Less than 50% letters
+        if alpha_chars < len(text) * 0.5 and len(words) > 1:  # Less than 50% letters and not a single word
             logger.info(f"Ignoring non-text transcription: {text}")
             return None
         
-        # Check minimum word count
-        words = [w for w in text.split() if w.strip() and any(c.isalpha() for c in w)]
+        # Check minimum word count - but be more lenient for acknowledged words
         if len(words) < config.min_confidence_length:
-            logger.info(f"Transcription too short ({len(words)} words): {text}")
-            return None
+            # If it's very short, check if any word is meaningful
+            if len(words) == 1 and words[0] not in VALID_ACKNOWLEDGEMENTS_SET:
+                logger.info(f"Single word not in acknowledgements: {text}")
+                return None
+            elif len(words) == 2:
+                # For two words, at least one should be meaningful
+                if not any(word in VALID_ACKNOWLEDGEMENTS_SET for word in words):
+                    logger.info(f"Two words, neither meaningful: {text}")
+                    return None
         
-        # Check for repeated characters (often indicates noise)
-        if len(set(text.replace(" ", ""))) < 3:
+        # Check for repeated characters (often indicates noise) - but allow short responses
+        if len(set(text.replace(" ", ""))) < 3 and len(text) > 5:
             logger.info(f"Ignoring repetitive transcription: {text}")
             return None
         
-        # Check for non-English characters (basic check)
+        # Check for non-English characters (basic check) - but be more lenient for short text
         non_ascii_chars = sum(1 for c in text if ord(c) > 127)
-        if non_ascii_chars > len(text) * 0.3:  # More than 30% non-ASCII
+        if non_ascii_chars > len(text) * 0.5 and len(text) > 10:  # More than 50% non-ASCII in longer text
             logger.info(f"Ignoring non-English transcription: {text}")
             return None
         
-        # Language detection using simple heuristics
-        common_english_words = {"the", "is", "are", "and", "or", "but", "in", "on", "at", 
-                               "to", "for", "of", "with", "as", "by", "that", "this",
-                               "what", "how", "when", "where", "why", "who", "which",
-                               "can", "will", "would", "should", "could", "have", "has", 
-                               "launch", "open", "start", "play", "run", "create", "delete", "edit", "save"}
-        
-        words_lower = [w.lower() for w in words]
-        english_word_count = sum(1 for w in words_lower if w in common_english_words)
-        
-        # Require at least one common English word for short phrases
-        if len(words) < 10 and english_word_count == 0:
-            logger.info(f"No common English words found in short phrase: {text}")
-            return None
+        # Language detection using simple heuristics - but skip for acknowledged phrases
+        if normalized_text not in VALID_ACKNOWLEDGEMENTS_SET:
+            common_english_words = {"the", "is", "are", "and", "or", "but", "in", "on", "at", 
+                                   "to", "for", "of", "with", "as", "by", "that", "this",
+                                   "what", "how", "when", "where", "why", "who", "which",
+                                   "can", "will", "would", "should", "could", "have", "has", 
+                                   "launch", "open", "start", "play", "run", "create", "delete", "edit", "save"}
+            
+            words_lower = [w.lower() for w in words]
+            english_word_count = sum(1 for w in words_lower if w in common_english_words)
+            acknowledgement_count = sum(1 for w in words_lower if w in VALID_ACKNOWLEDGEMENTS_SET)
+            
+            # Require at least one common English word OR acknowledgement for longer phrases
+            if len(words) >= 3 and english_word_count == 0 and acknowledgement_count == 0:
+                logger.info(f"No common English or acknowledgement words found: {text}")
+                return None
         
         logger.info(f"Valid transcription: {text[:100]}...")
         return text

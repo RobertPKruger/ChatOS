@@ -1,6 +1,6 @@
-# voice_assistant/model_providers/failover_chat.py - PERFORMANCE OPTIMIZED
+# voice_assistant/model_providers/failover_chat.py - FIXED JSON SERIALIZATION
 """
-Failover chat provider with performance optimizations and better tool handling
+Failover chat provider with JSON serialization fix
 """
 
 import json
@@ -20,6 +20,17 @@ class MockToolCall:
         self.id = id
         self.type = "function"
         self.function = MockFunction(function_name, function_arguments)
+    
+    def to_dict(self):
+        """Convert to dictionary for JSON serialization"""
+        return {
+            'id': self.id,
+            'type': self.type,
+            'function': {
+                'name': self.function.name,
+                'arguments': self.function.arguments
+            }
+        }
 
 class MockFunction:
     """Mock function object"""
@@ -45,7 +56,7 @@ class MockCompletion:
         self.choices = choices
 
 class FailoverChatProvider:
-    """Chat provider with local-first + cloud backup strategy and performance optimizations"""
+    """Chat provider with local-first + cloud backup strategy and JSON serialization fixes"""
     
     def __init__(self, primary: ChatCompletionProvider, backup: ChatCompletionProvider, timeout: float = 15):
         self.primary = primary
@@ -57,7 +68,7 @@ class FailoverChatProvider:
         self.max_consecutive_failures = 2  # Switch to backup after 2 failures
         
     def complete(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
-        """Synchronous completion with failover logic and performance optimizations"""
+        """Synchronous completion with failover logic and serialization fixes"""
         self.call_count += 1
         logger.info(f"=== Failover complete() call #{self.call_count} ===")
         
@@ -129,7 +140,7 @@ class FailoverChatProvider:
             return completion
     
     def _try_backup(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
-        """Try backup provider with proper error handling"""
+        """Try backup provider with proper error handling and serialization fixes"""
         try:
             start_time = time.time()
             
@@ -156,26 +167,42 @@ class FailoverChatProvider:
             return MockCompletion([mock_choice])
     
     def _clean_messages_for_openai(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Clean and validate messages for OpenAI API compatibility"""
+        """Clean and validate messages for OpenAI API compatibility with serialization fixes"""
         clean_messages = []
         
         for i, msg in enumerate(messages):
             if isinstance(msg, dict):
                 clean_msg = dict(msg)
                 
-                # Handle tool_calls serialization
+                # Handle tool_calls serialization - FIXED VERSION
                 if 'tool_calls' in clean_msg and clean_msg['tool_calls']:
                     clean_tool_calls = []
                     for tc in clean_msg['tool_calls']:
                         if isinstance(tc, dict):
+                            # Already a dictionary
                             clean_tool_calls.append(tc)
-                        elif hasattr(tc, 'id'):  # Object with attributes
+                        elif hasattr(tc, 'to_dict'):
+                            # Has serialization method
+                            clean_tool_calls.append(tc.to_dict())
+                        elif hasattr(tc, 'id'):  # MockToolCall or similar object
                             clean_tc = {
                                 'id': tc.id,
                                 'type': getattr(tc, 'type', 'function'),
                                 'function': {
-                                    'name': tc.function.name,
-                                    'arguments': tc.function.arguments
+                                    'name': tc.function.name if hasattr(tc, 'function') else '',
+                                    'arguments': tc.function.arguments if hasattr(tc, 'function') else '{}'
+                                }
+                            }
+                            clean_tool_calls.append(clean_tc)
+                        else:
+                            # Try to convert to string representation
+                            logger.warning(f"Unknown tool call type: {type(tc)}, converting to string")
+                            clean_tc = {
+                                'id': str(getattr(tc, 'id', f'unknown_{i}')),
+                                'type': 'function',
+                                'function': {
+                                    'name': str(tc),
+                                    'arguments': '{}'
                                 }
                             }
                             clean_tool_calls.append(clean_tc)
@@ -186,38 +213,60 @@ class FailoverChatProvider:
                 # Convert non-dict messages
                 clean_messages.append({"role": "assistant", "content": str(msg)})
         
-        # Validate tool call/response pairs
+        # Validate tool call/response pairs with better error handling
         validated_messages = []
-        skip_next_tools = False
+        skip_orphaned_tools = False
         
         for i, msg in enumerate(clean_messages):
-            if skip_next_tools and msg.get('role') == 'tool':
+            if skip_orphaned_tools and msg.get('role') == 'tool':
+                logger.debug(f"Skipping orphaned tool message: {msg.get('tool_call_id', 'unknown')}")
                 continue
             
-            skip_next_tools = False
+            skip_orphaned_tools = False
             
             if msg.get('role') == 'assistant' and msg.get('tool_calls'):
                 # Check if subsequent tool responses exist
-                tool_call_ids = {tc['id'] for tc in msg['tool_calls']}
+                tool_call_ids = set()
+                for tc in msg['tool_calls']:
+                    if isinstance(tc, dict) and 'id' in tc:
+                        tool_call_ids.add(tc['id'])
+                
                 found_responses = set()
                 
                 # Look ahead for tool responses
                 j = i + 1
                 while j < len(clean_messages) and clean_messages[j].get('role') == 'tool':
                     tool_msg = clean_messages[j]
-                    if tool_msg.get('tool_call_id') in tool_call_ids:
-                        found_responses.add(tool_msg['tool_call_id'])
+                    tool_call_id = tool_msg.get('tool_call_id')
+                    if tool_call_id in tool_call_ids:
+                        found_responses.add(tool_call_id)
                     j += 1
                 
-                # If we're missing tool responses, remove tool_calls
+                # If we're missing tool responses, remove orphaned tool_calls
                 if len(found_responses) < len(tool_call_ids):
-                    logger.warning(f"Removing orphaned tool_calls: {tool_call_ids - found_responses}")
+                    missing_ids = tool_call_ids - found_responses
+                    logger.warning(f"Removing orphaned tool_calls: {missing_ids}")
+                    
+                    # Filter out orphaned tool calls
+                    valid_tool_calls = [
+                        tc for tc in msg['tool_calls'] 
+                        if isinstance(tc, dict) and tc.get('id') in found_responses
+                    ]
+                    
                     clean_msg = dict(msg)
-                    clean_msg.pop('tool_calls', None)
-                    if not clean_msg.get('content'):
-                        clean_msg['content'] = "I'll help you with that."
+                    if valid_tool_calls:
+                        clean_msg['tool_calls'] = valid_tool_calls
+                    else:
+                        # Remove tool_calls entirely if none are valid
+                        clean_msg.pop('tool_calls', None)
+                        if not clean_msg.get('content'):
+                            clean_msg['content'] = "I'll help you with that."
+                    
                     validated_messages.append(clean_msg)
-                    skip_next_tools = True
+                    
+                    # Skip orphaned tool responses
+                    if len(found_responses) != len(tool_call_ids):
+                        skip_orphaned_tools = True
                 else:
                     validated_messages.append(msg)
             else:
