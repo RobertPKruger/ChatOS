@@ -1,4 +1,4 @@
-# voice_assistant/conversation.py - FIXED WITH SIMPLE READABLE RESPONSE APPROACH
+# voice_assistant/conversation.py - FIXED WEB NAVIGATION ACKNOWLEDGEMENTS
 """
 Main conversation loop with improved text extraction and error handling
 """
@@ -58,6 +58,98 @@ class ConversationManager:
             return False
         
         return True
+    
+    def _should_have_used_tool(self, user_text: str, response_content: str) -> bool:
+        """Detect if the model should have used a tool based on user input"""
+        user_lower = user_text.lower().strip()
+        
+        # Define action patterns that MUST use tools
+        tool_required_patterns = [
+            # App launching
+            ("open", ["notepad", "excel", "word", "chrome", "calculator", "explorer"]),
+            ("launch", ["notepad", "excel", "word", "chrome", "steam", "game"]),
+            ("start", ["notepad", "excel", "word", "chrome", "steam"]),
+            ("run", ["notepad", "excel", "word", "chrome"]),
+            
+            # Web navigation
+            ("go to", ["reddit", "amazon", "github", "website", ".com", "http"]),
+            ("navigate to", ["reddit", "amazon", "github", "website", ".com"]),
+            ("visit", ["reddit", "amazon", "github", "website", ".com"]),
+            
+            # File operations
+            ("create", ["file", "folder", "directory", "text file"]),
+            ("make", ["file", "folder", "directory"]),
+            ("write", ["file", "text", "document"]),
+            ("delete", ["file", "folder"]),
+            
+            # Listing operations
+            ("list", ["files", "folders", "steam games", "games", "apps"]),
+            ("show", ["files", "folders", "steam games", "my games"]),
+            ("find", ["files", "pdf", "documents"]),
+            
+            # Steam specific
+            ("open", ["steam", "arena", "magic", "game on steam"]),
+            ("launch", ["arena", "magic", "game on steam"]),
+        ]
+        
+        # Check each pattern
+        for action, targets in tool_required_patterns:
+            if action in user_lower:
+                # Check if any target is mentioned
+                if any(target in user_lower for target in targets):
+                    logger.info(f"Detected tool-required pattern: '{action}' with targets in '{user_text}'")
+                    return True
+        
+        # Additional check for specific phrases
+        specific_tool_phrases = [
+            "please open",
+            "please launch", 
+            "please go to",
+            "please start",
+            "can you open",
+            "can you launch",
+            "could you open",
+            "would you open",
+            "open .* for me",  # regex pattern
+            "launch .* for me",
+        ]
+        
+        import re
+        for phrase in specific_tool_phrases:
+            if re.search(phrase, user_lower):
+                logger.info(f"Detected tool-required phrase: '{phrase}' in '{user_text}'")
+                return True
+        
+        return False
+    
+    def _serialize_tool_calls(self, tool_calls):
+        """Convert tool calls to JSON-serializable format"""
+        serialized = []
+        for tc in tool_calls:
+            if isinstance(tc, dict):
+                serialized.append(tc)
+            else:
+                # Handle MockToolCall or similar objects
+                serialized_tc = {
+                    'id': getattr(tc, 'id', ''),
+                    'type': getattr(tc, 'type', 'function')
+                }
+                
+                # Handle the function object
+                if hasattr(tc, 'function'):
+                    serialized_tc['function'] = {
+                        'name': getattr(tc.function, 'name', ''),
+                        'arguments': getattr(tc.function, 'arguments', '{}')
+                    }
+                else:
+                    serialized_tc['function'] = {
+                        'name': 'unknown',
+                        'arguments': '{}'
+                    }
+                
+                serialized.append(serialized_tc)
+        
+        return serialized
 
     def _create_generic_response(self, tool_name: str, user_request: str) -> str:
         """Create a generic response based on the tool and user request"""
@@ -86,6 +178,23 @@ class ConversationManager:
         
         elif tool_name == "open_steam":
             return "I've opened Steam for you."
+        
+        # Web navigation - FIXED TO HANDLE WEB URLS
+        elif tool_name in ["open_url", "smart_navigate"]:
+            # Try to extract website from user request
+            if "reddit" in user_lower:
+                return "I've opened Reddit for you."
+            elif "amazon" in user_lower:
+                return "I've opened Amazon for you."
+            elif "github" in user_lower:
+                return "I've opened GitHub for you."
+            elif "weather" in user_lower:
+                return "I've opened the weather site for you."
+            elif "duolingo" in user_lower:
+                return "I've opened Duolingo for you."
+            elif any(word in user_lower for word in ["website", "site", "url", "go to", "navigate"]):
+                return "I've opened the website for you."
+            return "I've opened the website for you."
         
         # File operations
         elif tool_name == "create_folder":
@@ -179,18 +288,57 @@ class ConversationManager:
         # Last resort - convert to string
         return str(data).strip()
     
-    def _is_successful_launch(self, text: str) -> bool:
-        """Check if text indicates a successful app launch"""
+    def _is_successful_launch(self, text: str, tool_name: str = None) -> bool:
+        """Check if text indicates a successful app launch or web navigation - ENHANCED"""
         if not text:
             return False
-        lower_text = text.lower()
-        # Look for success indicators
-        success_indicators = ["launched", "opening", "started successfully"]
-        # Look for failure indicators
-        failure_indicators = ["failed", "error", "not found", "could not", "couldn't", "unable"]
         
-        has_success = any(indicator in lower_text for indicator in success_indicators)
+        lower_text = text.lower()
+        
+        # Web navigation success indicators - ADDED
+        web_success_indicators = [
+            "opened browser",
+            "opened website", 
+            "opened url",
+            "opened http",
+            "opened https",
+            "navigate to",
+            "browser to",
+            "webbrowser.open"
+        ]
+        
+        # App launch success indicators
+        app_success_indicators = [
+            "launched", 
+            "opening", 
+            "started successfully",
+            "opened application",
+            "opened app"
+        ]
+        
+        # Combined success indicators
+        all_success_indicators = web_success_indicators + app_success_indicators
+        
+        # Failure indicators
+        failure_indicators = [
+            "failed", 
+            "error", 
+            "not found", 
+            "could not", 
+            "couldn't", 
+            "unable",
+            "application not found",
+            "path not found"
+        ]
+        
+        has_success = any(indicator in lower_text for indicator in all_success_indicators)
         has_failure = any(indicator in lower_text for indicator in failure_indicators)
+        
+        # ADDITIONAL CHECK: If tool_name suggests web navigation, be more lenient
+        if tool_name in ["open_url", "smart_navigate"]:
+            # For web tools, even simple "Opened" is likely success
+            if "opened" in lower_text and not has_failure:
+                return True
         
         return has_success and not has_failure
         
@@ -249,14 +397,22 @@ class ConversationManager:
         # Launch acknowledgment toggle commands
         if any(phrase in lower_text for phrase in ["turn on launch acknowledgment", "enable launch acknowledgment", 
                                                      "turn on launch acknowledgements", "enable launch acknowledgements"]):
-            self.config.acknowledge_launches = True
+            # Check if acknowledge_launches attribute exists, add if not
+            if not hasattr(self.config, 'acknowledge_launches'):
+                self.config.acknowledge_launches = True
+            else:
+                self.config.acknowledge_launches = True
             await speak_text("Launch acknowledgments enabled.", self.state, self.config)
             return True
             
         if any(phrase in lower_text for phrase in ["turn off launch acknowledgment", "disable launch acknowledgment",
                                                     "turn off launch acknowledgements", "disable launch acknowledgements",
                                                     "no launch acknowledgment", "no launch acknowledgements"]):
-            self.config.acknowledge_launches = False
+            # Check if acknowledge_launches attribute exists, add if not
+            if not hasattr(self.config, 'acknowledge_launches'):
+                self.config.acknowledge_launches = False
+            else:
+                self.config.acknowledge_launches = False
             await speak_text("Launch acknowledgments disabled.", self.state, self.config)
             return True
 
@@ -393,6 +549,126 @@ class ConversationManager:
 
             choice  = completion.choices[0]
             message = choice.message
+
+            if not (choice.finish_reason == "tool_calls" and message.tool_calls):
+                response_text = message.content or ""
+
+                # Serialize tool calls before adding to history
+                serialized_tool_calls = self._serialize_tool_calls(message.tool_calls)
+                self.state.add_assistant_message(message.content, serialized_tool_calls)
+                
+                # Check if the response CONTAINS tool information but isn't properly formatted
+                if "[Tools used:" in response_text or "Called" in response_text:
+                    logger.warning(f"Model included tool info in text instead of proper tool calls: {response_text[:100]}")
+                    
+                    # Extract what tool the model claims to have used
+                    import re
+                    tool_pattern = r'Called (\w+) with \{([^}]+)\}'
+                    matches = re.findall(tool_pattern, response_text)
+                    
+                    if matches:
+                        claimed_tool, claimed_args = matches[0]
+                        logger.info(f"Model claims to have called: {claimed_tool} with args containing: {claimed_args[:50]}")
+                        
+                        # Check if this makes sense for the current user request
+                        user_lower = user_text.lower()
+                        
+                        # Define expected tool mappings
+                        expected_tools = {
+                            "open_url": ["go to", "navigate", "visit", ".com", "website"],
+                            "launch_app": ["open", "launch", "start", "run"],
+                            "launch_steam_game": ["steam", "game", "arena", "play"],
+                            "create_file": ["create", "make", "write"],
+                            "list_files": ["list", "show", "files"],
+                        }
+                        
+                        # Check if the claimed tool matches the user request
+                        tool_seems_wrong = True
+                        if claimed_tool in expected_tools:
+                            for keyword in expected_tools[claimed_tool]:
+                                if keyword in user_lower:
+                                    tool_seems_wrong = False
+                                    break
+                        
+                        # Also check if the args seem unrelated to the request
+                        args_seem_wrong = True
+                        # Extract key words from claimed args (domains, app names, etc.)
+                        arg_words = re.findall(r'\w+', claimed_args.lower())
+                        user_words = re.findall(r'\w+', user_lower)
+                        
+                        # Check for any overlap
+                        if any(word in user_words for word in arg_words if len(word) > 3):
+                            args_seem_wrong = False
+                        
+                        if tool_seems_wrong or args_seem_wrong:
+                            logger.warning(f"Tool '{claimed_tool}' or args don't match user request: '{user_text}'")
+                            logger.info("Model appears confused, likely referencing old tool calls")
+    
+                    should_fallback = True
+
+                    # Remove the bad response
+                    if (self.state.conversation_history and 
+                        self.state.conversation_history[-1].get("role") == "assistant"):
+                        self.state.conversation_history.pop()
+                        logger.info("Removed incorrect non-tool response from history")
+                else:
+                    # Check if tools should have been used based on user input
+                    should_fallback = self._should_have_used_tool(user_text, response_text)
+                
+                if should_fallback:
+                    logger.warning(f"Local model failed to use tools for: '{user_text}'")
+                    logger.warning(f"Model responded with: '{response_text[:100]}...' instead of tool call")
+                    
+                    # Remove the incorrect response from history if it was added
+                    if (self.state.conversation_history and 
+                        self.state.conversation_history[-1].get("role") == "assistant"):
+                        self.state.conversation_history.pop()
+                        logger.info("Removed incorrect non-tool response from history")
+                    
+                    # Force fallback to OpenAI
+                    logger.info("Forcing fallback to OpenAI due to missing tool call")
+                    
+                    try:
+                        from .model_providers.openai_chat import OpenAIChatProvider
+                        backup_provider = OpenAIChatProvider(
+                            api_key=self.config.openai_api_key,
+                            model=self.config.frontier_chat_model
+                        )
+                        
+                        # Clean the conversation history using the STRICT method
+                        clean_history = self._clean_conversation_history_strict()
+                        
+                        # Get OpenAI's response with tools
+                        fallback_completion = backup_provider.complete(
+                            messages=clean_history,
+                            tools=tools,
+                            tool_choice="auto"
+                        )
+                        
+                        # Process OpenAI's response (it should have tool calls)
+                        fallback_choice = fallback_completion.choices[0]
+                        fallback_message = fallback_choice.message
+                        
+                        if fallback_choice.finish_reason == "tool_calls" and fallback_message.tool_calls:
+                            serialized_fallback_tool_calls = self._serialize_tool_calls(fallback_message.tool_calls)
+                            self.state.conversation_history.append({
+                                "role": "assistant",
+                                "content": fallback_message.content,
+                                "tool_calls": serialized_fallback_tool_calls
+                            })
+
+                            # Continue with OpenAI's tool calls
+                           # choice = fallback_choice
+                           # message = fallback_message
+                           # logger.info("✅ OpenAI provided tool calls, continuing with those")
+                        else:
+                            # Even OpenAI didn't generate tools? 
+                            logger.error("Even OpenAI didn't generate tool calls!")
+                            return "I'm having trouble understanding that request. Could you please rephrase it?"
+                            
+                    except Exception as fallback_error:
+                        logger.error(f"Fallback to OpenAI failed: {fallback_error}")
+                        return "I'm having trouble processing action requests right now. Please try again."
             
             assistant_response = ""
             last_tool_name = None  # Track the last tool used
@@ -420,10 +696,10 @@ class ConversationManager:
                         # Extract clean text from result
                         clean_result = self._extract_text_from_any_format(tool_result)
 
-                        # Check if this was a successful launch
-                        if self._is_successful_launch(clean_result):
+                        # Check if this was a successful launch - PASS TOOL NAME
+                        if self._is_successful_launch(clean_result, tool_call.function.name):
                             self.successful_launch = True
-                            logger.debug(f"Detected successful launch in: {clean_result[:50]}...")
+                            logger.debug(f"Detected successful launch in: {clean_result[:50]}... (tool: {tool_call.function.name})")
                         
                         # Log for debugging
                         logger.debug(f"Tool {tool_call.function.name} raw result type: {type(tool_result)}")
@@ -454,7 +730,7 @@ class ConversationManager:
                             )
                             
                             # Clean the conversation history for OpenAI
-                            clean_history = self._clean_conversation_history()
+                            clean_history = self._clean_conversation_history_strict()
                             
                             fallback_completion = backup_provider.complete(
                                 messages=clean_history,
@@ -490,10 +766,10 @@ class ConversationManager:
                                         )
                                         
                                         clean_backup_result = self._extract_text_from_any_format(backup_result)
-                                        # Check if backup resulted in successful launch
-                                        if self._is_successful_launch(clean_backup_result):
+                                        # Check if backup resulted in successful launch - PASS TOOL NAME
+                                        if self._is_successful_launch(clean_backup_result, backup_tool_call.function.name):
                                             self.successful_launch = True
-                                            logger.debug(f"Detected successful launch in backup: {clean_backup_result[:50]}...")
+                                            logger.debug(f"Detected successful launch in backup: {clean_backup_result[:50]}... (tool: {backup_tool_call.function.name})")
                                         
                                         self.state.conversation_history.append({
                                             "role": "tool",
@@ -565,12 +841,23 @@ class ConversationManager:
                     if follow_up_choice.finish_reason == "tool_calls" and follow_up_message.tool_calls:
                         logger.warning("Local model returned tool calls in follow-up instead of text response!")
                         
-                        # Use clean generic response
-                        assistant_response = self._clean_response_for_speech(
-                            tool_results[-1] if tool_results else "Task completed",
-                            tool_name=last_tool_name,
-                            user_request=original_user_text
-                        )
+                        # Try to generate a sensible response based on what was done
+                        if last_tool_name:
+                            # Create responses based on the tool that was executed
+                            tool_responses = {
+                                "open_url": "I've opened that website in your browser.",
+                                "launch_app": f"I've launched {original_user_text.replace('open', '').replace('launch', '').replace('please', '').strip()} for you.",
+                                "launch_steam_game": "I've launched the game in Steam.",
+                                "create_folder": "I've created the folder for you.",
+                                "create_file": "I've created the file for you.",
+                                "list_files": "I've listed the files above.",
+                                "search_files": "I've completed the search.",
+                            }
+                            
+                            assistant_response = tool_responses.get(last_tool_name, "I've completed that task for you.")
+                        else:
+                            # Fallback generic response
+                            assistant_response = "I've completed that task for you."
                         
                         self.state.conversation_history.append({
                             "role": "assistant", 
@@ -609,32 +896,69 @@ class ConversationManager:
             logger.error(f"Error in chat completion: {e}")
             return "I encountered an error processing your request. Please try again."
 
-    def _clean_conversation_history(self):
-        """Clean conversation history for OpenAI compatibility"""
+   
+    def _clean_conversation_history_strict(self):
+        """Strictly clean conversation history removing any orphaned tool calls"""
         clean_history = []
-        for msg in self.state.conversation_history:
-            if isinstance(msg, dict):
-                clean_msg = dict(msg)
-                if 'tool_calls' in clean_msg and clean_msg['tool_calls']:
-                    clean_tool_calls = []
-                    for tc in clean_msg['tool_calls']:
-                        if isinstance(tc, dict):
-                            clean_tool_calls.append(tc)
-                        else:
-                            clean_tc = {
-                                'id': getattr(tc, 'id', ''),
-                                'type': getattr(tc, 'type', 'function'),
-                                'function': {
-                                    'name': getattr(tc.function, 'name', '') if hasattr(tc, 'function') else '',
-                                    'arguments': getattr(tc.function, 'arguments', '{}') if hasattr(tc, 'function') else '{}'
-                                }
-                            }
-                            clean_tool_calls.append(clean_tc)
-                    clean_msg['tool_calls'] = clean_tool_calls
-                clean_history.append(clean_msg)
+        
+        i = 0
+        while i < len(self.state.conversation_history):
+            msg = self.state.conversation_history[i]
+            
+            # Always keep system messages
+            if msg.get("role") == "system":
+                clean_history.append(msg)
+                i += 1
+                continue
+            
+            # For assistant messages with tool_calls, verify all have responses
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                tool_call_ids = set()
+                for tc in msg["tool_calls"]:
+                    if isinstance(tc, dict):
+                        tool_call_ids.add(tc.get("id"))
+                    else:
+                        tool_call_ids.add(getattr(tc, "id", None))
+                
+                # Look ahead for corresponding tool responses
+                found_responses = set()
+                j = i + 1
+                tool_messages = []
+                
+                while j < len(self.state.conversation_history) and self.state.conversation_history[j].get("role") == "tool":
+                    tool_msg = self.state.conversation_history[j]
+                    tool_call_id = tool_msg.get("tool_call_id")
+                    if tool_call_id in tool_call_ids:
+                        found_responses.add(tool_call_id)
+                        tool_messages.append(tool_msg)
+                    j += 1
+                
+                # Only include if ALL tool calls have responses
+                if found_responses == tool_call_ids:
+                    clean_history.append(msg)
+                    clean_history.extend(tool_messages)
+                    i = j
+                else:
+                    # Skip this assistant message and its partial tool responses
+                    logger.warning(f"Removing assistant message with orphaned tool calls: {tool_call_ids - found_responses}")
+                    # Also need to ensure the message has content if we remove tool_calls
+                    clean_msg = dict(msg)
+                    clean_msg.pop("tool_calls", None)
+                    if clean_msg.get("content"):
+                        clean_history.append(clean_msg)
+                    i = j
+            
+            # Skip orphaned tool messages
+            elif msg.get("role") == "tool":
+                logger.warning(f"Skipping orphaned tool message: {msg.get('tool_call_id')}")
+                i += 1
+                continue
+            
+            # Keep all other messages
             else:
                 clean_history.append(msg)
-        
+                i += 1
+    
         return clean_history
 
     async def conversation_loop(self):
@@ -773,7 +1097,10 @@ class ConversationManager:
                         # Speak the response if not interrupted
                         if not self.state.interrupt_flag.is_set() and \
                             self.state.get_mode() != AssistantMode.STUCK_CHECK:
-                            if self.successful_launch and not self.config.acknowledge_launches:
+                            # ENHANCED CHECK: Use acknowledge_launches setting with fallback
+                            acknowledge_launches = getattr(self.config, 'acknowledge_launches', True)
+                            
+                            if self.successful_launch and not acknowledge_launches:
                                 self.state.set_mode(AssistantMode.LISTENING)
                                 logger.info("Launch detected but acknowledgment disabled. Skipping speech.")
                             else:
@@ -800,6 +1127,9 @@ class ConversationManager:
                 await self.stuck_task
             except asyncio.CancelledError:
                 pass
+
+
+
 
     async def shutdown_system(self):
         """Properly shut down both server and client"""

@@ -25,8 +25,6 @@ class Config:
     # === MODEL CONFIGURATION ===
     # Transcription
     stt_model: str
-
-    acknowledge_launches: bool  # Voice acknowledgment for app launches
     
     # Chat Models
     local_chat_model: str
@@ -73,6 +71,8 @@ class Config:
     # === VALIDATION CONFIGURATION ===
     min_confidence_length: int
     english_confidence_threshold: float
+
+    acknowledge_launches: bool = True  # Voice acknowledgment for app launches
     
     @classmethod
     def from_env(cls) -> "Config":

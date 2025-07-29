@@ -1,6 +1,6 @@
-# voice_assistant/state.py - COMPLETE FIX with updated system prompt
+# voice_assistant/state.py - ENHANCED SYSTEM PROMPT FOR CONSISTENT TOOL CALLING
 """
-State management for the voice assistant with proper PDF tool support
+State management for the voice assistant with improved system prompt
 """
 
 import threading
@@ -22,158 +22,64 @@ from .model_providers.base import TranscriptionProvider, ChatCompletionProvider,
 
 logger = logging.getLogger(__name__)
 
-# COMPLETE SYSTEM PROMPT with all available tools clearly defined
-# voice_assistant/state.py - COMPREHENSIVE SYSTEM PROMPT
-# Replace the SYSTEM_PROMPT variable with this complete version
 
-# Enhanced SYSTEM_PROMPT with better action word recognition
-# Add this section to your existing SYSTEM_PROMPT
+SYSTEM_PROMPT = """You are a voice assistant. When someone asks you to DO something, use a JSON tool. When they ask a question, give a text answer.
 
-SYSTEM_PROMPT = """You are a helpful voice assistant with access to tools. You have two modes of operation:
+🚨 **RULE: If you see these words, you MUST use a tool:**
+- "open" = tool
+- "go to" = tool  
+- "navigate" = tool
+- "launch" = tool
+- "start" = tool
+- "create" = tool
 
-1. CONVERSATION MODE: Respond normally with text for questions, greetings, and discussions
-2. TOOL MODE: Use JSON tool calls ONLY when asked to DO something specific
+🚨 **NEVER say "I've completed" or "I've opened" without using a tool first!**
 
-=== CRITICAL: ACTION WORD DETECTION ===
-ALWAYS use tools when you hear these ACTION WORDS:
-✅ CREATE → Use create_file or create_folder
-✅ MAKE → Use create_file or create_folder  
-✅ OPEN → Use launch_app or open_url
-✅ LAUNCH → Use launch_app
-✅ START → Use launch_app
-✅ RUN → Use launch_app
-✅ GO TO → Use open_url
-✅ NAVIGATE → Use open_url
-✅ FIND → Use list_files or find_and_open_first_pdf
-✅ WRITE → Use create_file
-✅ ADD → Use append_file
-✅ APPEND → Use append_file
-✅ READ → Use read_file
-✅ LIST → Use list_files
+=== STEP-BY-STEP PROCESS ===
 
-SPECIFIC FILE CREATION PATTERNS:
-- "create a text file" → {"name": "create_file", "arguments": {"path": "...", "content": ""}}
-- "create a file called X" → {"name": "create_file", "arguments": {"path": "...X.txt", "content": ""}}
-- "make a file" → {"name": "create_file", "arguments": {"path": "...", "content": ""}}
-- "write a file" → {"name": "create_file", "arguments": {"path": "...", "content": ""}}
+1. Read the user request
+2. Look for action words: "open", "go to", "navigate", "launch", "start", "create"
+3. If you find action words → Use a tool
+4. If no action words → Give text response
 
-=== WHEN TO USE TOOLS ===
-ONLY use tools when the user explicitly asks you to PERFORM AN ACTION:
-✅ "Open notepad" → Use tool
-✅ "Launch Excel" → Use tool  
-✅ "Find the first PDF" → Use tool
-✅ "Go to Reddit" → Use tool
-✅ "Create a folder" → Use tool
-✅ "Create a text file" → Use tool
-✅ "Make a file called X" → Use tool
-✅ "Write a file in that folder" → Use tool
+=== TOOLS ===
 
-=== WHEN NOT TO USE TOOLS ===
-NEVER use tools for conversational responses:
-❌ "Thank you" → Just say "You're welcome!"
-❌ "That's correct" → Just say "Great!"  
-❌ "Hello" → Just say "Hello! How can I help?"
-❌ "What language do they speak in Brazil?" → Just answer "Portuguese"
-❌ "Did you create the file?" → Just answer based on what happened
-❌ "Yes", "No", "OK" → Just acknowledge conversationally
+**Applications:** {"name": "launch_app", "arguments": {"app_name": "notepad"}}
+**Websites:** {"name": "open_url", "arguments": {"url": "https://site.com"}}
+**Steam Games:** {"name": "launch_steam_game", "arguments": {"game_name": "game"}}
+**Files:** {"name": "create_file", "arguments": {"path": "file.txt", "content": ""}}
 
-=== TOOL FORMAT ===
-When using tools, respond with ONLY a JSON object:
-{"name": "tool_name", "arguments": {"parameter": "value"}}
+=== EXAMPLES ===
 
-No explanations, no descriptions, just the JSON.
+User: "Please open Nugget News"
+Think: Contains "open" → Use tool → Website
+Response: {"name": "open_url", "arguments": {"url": "https://www.nuggetnews.com"}}
 
-=== AVAILABLE TOOLS ===
+User: "Go to nuggetnews.com"  
+Think: Contains "go to" → Use tool → Website
+Response: {"name": "open_url", "arguments": {"url": "https://nuggetnews.com"}}
 
-APPLICATION TOOLS:
-- Basic launch: {"name": "launch_app", "arguments": {"app_name": "notepad"}}
-- Launch with file: {"name": "launch_app", "arguments": {"app_name": "acrobat", "file_path": "~/Desktop/file.pdf"}}
+User: "Open Magic the Gathering Arena on Steam"
+Think: Contains "open" → Use tool → Steam game
+Response: {"name": "launch_steam_game", "arguments": {"game_name": "Magic the Gathering Arena"}}
 
-PDF & FILE TOOLS (Use these for PDF requests):
-- Find first PDF: {"name": "find_and_open_first_pdf", "arguments": {"directory_path": "~/Desktop", "app_name": "acrobat"}}
-- Open specific PDF: {"name": "open_pdf_with_acrobat", "arguments": {"file_path": "~/Desktop/document.pdf"}}
-- Open any file: {"name": "open_file_with_app", "arguments": {"file_path": "~/Desktop/file.pdf", "app_name": "acrobat"}}
-
-WEBSITE TOOLS (Use these for ALL websites):
-- Open URL: {"name": "open_url", "arguments": {"url": "https://www.reddit.com"}}
-- Smart navigate: {"name": "smart_navigate", "arguments": {"query": "reddit"}}
-
-FILE SYSTEM TOOLS:
-- Create folder: {"name": "create_folder", "arguments": {"path": "~/Desktop/Projects"}}
-- Create file: {"name": "create_file", "arguments": {"path": "~/Desktop/file.txt", "content": "Hello"}}
-- Append to file: {"name": "append_file", "arguments": {"path": "~/Desktop/file.txt", "content": "New text"}}
-- Read file: {"name": "read_file", "arguments": {"path": "~/Desktop/file.txt"}}
-- List files: {"name": "list_files", "arguments": {"path": "~/Desktop"}}
-- Open folder: {"name": "open_folder", "arguments": {"path": "~/Desktop"}}
-
-STEAM TOOLS:
-- Open Steam: {"name": "open_steam", "arguments": {}}
-- Launch game: {"name": "launch_steam_game", "arguments": {"game_name": "Counter-Strike 2"}}
-- List games: {"name": "list_steam_games", "arguments": {}}
-
-=== PATH CONSTRUCTION RULES ===
-When creating files in previously mentioned folders:
-- If user said "create folder X", then "create file in that folder" → path should be "~/Desktop/X/filename.ext"
-- Always add .txt extension for text files if not specified
-- Use the exact folder name from context
-
-=== CRITICAL DECISION RULES ===
-
-1. CONVERSATION vs TOOLS:
-   - Questions → Conversation
-   - Greetings → Conversation  
-   - Acknowledgments → Conversation
-   - Action requests (with action words) → Tools
-
-2. FILE CREATION:
-   - "create a text file" → ALWAYS use create_file tool
-   - "make a file" → ALWAYS use create_file tool
-   - Include proper path construction from context
-   - Add .txt extension if not specified
-
-3. PDF HANDLING:
-   - "Open first PDF" → {"name": "find_and_open_first_pdf", "arguments": {"directory_path": "~/Desktop", "app_name": "acrobat"}}
-   - "Open [filename].pdf" → {"name": "open_pdf_with_acrobat", "arguments": {"file_path": "~/Desktop/filename.pdf"}}
-   - NEVER use read_file or append_file on PDFs!
-
-4. WEBSITES:
-   - "Go to Reddit" → {"name": "open_url", "arguments": {"url": "https://www.reddit.com"}}
-   - NEVER use launch_app with "chrome" for websites
-
-5. ACKNOWLEDGMENTS:
-   - "Yes", "No", "OK", "Thanks" → Normal conversation
-   - NEVER trigger tools for simple acknowledgments
-
-6. FILE OPERATIONS:
-   - Always use "append_file" (NOT "append_to_file")
-   - Use full paths when possible
-
-=== EXAMPLE CONVERSATIONS ===
-
-User: "Hello"
-Response: "Hello! How can I help you today?"
-
-User: "Create a folder called Projects"
-Response: {"name": "create_folder", "arguments": {"path": "~/Desktop/Projects"}}
-
-User: "Create a text file in that folder called notes"
-Response: {"name": "create_file", "arguments": {"path": "~/Desktop/Projects/notes.txt", "content": ""}}
-
-User: "Make a file called shopping list"
-Response: {"name": "create_file", "arguments": {"path": "~/Desktop/shopping list.txt", "content": ""}}
-
-User: "That's correct, thank you"
-Response: "You're welcome! Is there anything else I can help you with?"
-
-User: "Open notepad"
+User: "Please open notepad"
+Think: Contains "open" → Use tool → Application
 Response: {"name": "launch_app", "arguments": {"app_name": "notepad"}}
 
+User: "What is 2+2?"
+Think: No action words → Text response
+Response: "2+2 equals 4."
+
+User: "Hello"
+Think: No action words → Text response  
+Response: "Hello! How can I help?"
+
 === REMEMBER ===
-- ALWAYS use tools for action words (create, make, open, launch, etc.)
-- Be conversational for questions and acknowledgments
-- When you hear "create" or "make" + "file", ALWAYS use create_file tool
-- Never claim you've done something without actually calling the tool
-- Tools are for DOING, conversation is for TALKING"""
+- Action words = JSON tool (always)
+- Questions = Text response
+- If someone asks you to open/go to/navigate to ANYTHING, use a tool
+- Never fake completion with text"""
 
 class AssistantMode(Enum):
     """Assistant operational modes"""
@@ -276,7 +182,27 @@ class AssistantState:
         """Add assistant message and auto-trim if needed"""
         msg = {"role": "assistant", "content": content}
         if tool_calls:
-            msg["tool_calls"] = tool_calls
+            # Ensure tool_calls are JSON-serializable
+            if isinstance(tool_calls, list) and len(tool_calls) > 0:
+                if hasattr(tool_calls[0], '__dict__'):  # It's an object, not a dict
+                    # Convert to dict format
+                    serialized_tool_calls = []
+                    for tc in tool_calls:
+                        if isinstance(tc, dict):
+                            serialized_tool_calls.append(tc)
+                        else:
+                            serialized_tc = {
+                                'id': getattr(tc, 'id', ''),
+                                'type': getattr(tc, 'type', 'function'),
+                                'function': {
+                                    'name': tc.function.name if hasattr(tc, 'function') else '',
+                                    'arguments': tc.function.arguments if hasattr(tc, 'function') else '{}'
+                                }
+                            }
+                            serialized_tool_calls.append(serialized_tc)
+                    msg["tool_calls"] = serialized_tool_calls
+                else:
+                    msg["tool_calls"] = tool_calls
         self.conversation_history.append(msg)
         self.trim_conversation_history()
 
