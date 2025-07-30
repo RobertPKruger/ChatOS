@@ -31,8 +31,29 @@ class ConversationManager:
         if not tool_result:
             return "I couldn't get a result for that request."
         
-        # Clean the result
+        # Clean the result - handle TextContent objects
         result = str(tool_result).strip()
+        
+        # CRITICAL FIX: Handle TextContent objects that got stringified
+        if "[TextContent(" in result:
+            # Extract the actual text content
+            import re
+            text_match = re.search(r"text=['\"]([^'\"]*)['\"]", result)
+            if text_match:
+                result = text_match.group(1)
+            else:
+                # Try to extract any text between quotes
+                quote_match = re.search(r"['\"]([^'\"]+)['\"]", result)
+                if quote_match:
+                    result = quote_match.group(1)
+                else:
+                    # Fallback: clean up the raw content
+                    result = re.sub(r'\[TextContent\([^)]+\)\]', '', result)
+                    result = result.replace('annotations=None)', '').strip()
+        
+        # Remove other artifacts
+        result = re.sub(r'annotations=None\)', '', result)
+        result = result.strip()
         
         # STOCK PRICE EXTRACTION
         if tool_name == "get_current_stock_price" or "Stock Price for" in result:
@@ -80,41 +101,52 @@ class ConversationManager:
             elif current_price:
                 return f"The current stock price is {current_price}."
         
-        # WEATHER EXTRACTION
+        # WEATHER EXTRACTION - Enhanced
         elif tool_name == "get_weather" or any(keyword in result.lower() for keyword in ["weather", "temperature", "°f", "°c"]):
+            # Handle "No immediate answers found" case
+            if "no immediate answers found" in result.lower():
+                location_match = re.search(r"'weather ([^']+)'", result)
+                if location_match:
+                    location = location_match.group(1)
+                    return f"I couldn't find current weather data for {location}. You might want to check weather.com for current conditions."
+                else:
+                    return "I couldn't find weather information for that location right now."
+            
             lines = result.split('\n')
             
             # Look for temperature and conditions
             temp_info = None
             conditions_info = None
+            location_info = None
             
             for line in lines:
                 line = line.strip()
-                if any(temp_word in line.lower() for temp_word in ["temperature", "°f", "°c", "degrees"]):
+                if line.startswith("Weather for"):
+                    location_info = line
+                elif "Temperature:" in line:
+                    temp_info = line.replace("Temperature:", "").strip()
+                elif "Conditions:" in line:
+                    conditions_info = line.replace("Conditions:", "").strip()
+                elif any(temp_word in line.lower() for temp_word in ["°f", "°c", "degrees"]):
                     temp_info = line
-                elif any(condition_word in line.lower() for condition_word in ["conditions", "sunny", "cloudy", "rain", "snow", "clear"]):
+                elif any(condition_word in line.lower() for condition_word in ["sunny", "cloudy", "rain", "snow", "clear", "partly"]):
                     conditions_info = line
             
             # Build weather response
             if temp_info or conditions_info:
                 response_parts = []
-                if temp_info:
-                    # Clean up temperature line
-                    if "Temperature:" in temp_info:
-                        temp_value = temp_info.split("Temperature:")[1].strip()
-                        response_parts.append(f"The temperature is {temp_value}")
-                    else:
-                        response_parts.append(temp_info)
                 
+                if temp_info:
+                    response_parts.append(f"The temperature is {temp_info}")
                 if conditions_info:
-                    if "Conditions:" in conditions_info:
-                        cond_value = conditions_info.split("Conditions:")[1].strip()
-                        response_parts.append(f"with {cond_value}")
-                    else:
-                        response_parts.append(conditions_info)
+                    response_parts.append(f"with {conditions_info}")
                 
                 if response_parts:
                     return " ".join(response_parts) + "."
+            
+            # Fallback: if we have location info, use it
+            if location_info:
+                return location_info.replace("Weather for", "The weather for") + "."
         
         # WEB SEARCH EXTRACTION
         elif tool_name in ["web_search", "search_news"] or "Web search results" in result:
@@ -294,6 +326,13 @@ class ConversationManager:
             else:
                 # Direct response without tool calls
                 assistant_response = getattr(message, 'content', None) or "I'm not sure how to respond to that."
+                
+                # CRITICAL FIX: Check if this is tool syntax that shouldn't be spoken
+                if ("[Tools used:" in str(assistant_response) or 
+                    "Called " in str(assistant_response) and "{" in str(assistant_response)):
+                    # This is raw tool syntax - create a proper response
+                    assistant_response = "I've completed that task for you."
+                
                 self.state.conversation_history.append({
                     "role": "assistant", 
                     "content": assistant_response
