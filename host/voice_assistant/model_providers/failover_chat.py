@@ -1,6 +1,5 @@
-# voice_assistant/model_providers/failover_chat.py - FIXED JSON SERIALIZATION
 """
-Failover chat provider with JSON serialization fix
+Fixed failover chat provider with proper OpenAI message validation
 """
 
 import json
@@ -56,56 +55,104 @@ class MockCompletion:
         self.choices = choices
 
 class FailoverChatProvider:
-    """Chat provider with local-first + cloud backup strategy and JSON serialization fixes"""
+    """Fixed chat provider with proper message validation"""
     
     def __init__(self, primary: ChatCompletionProvider, backup: ChatCompletionProvider, timeout: float = 15):
         self.primary = primary
         self.backup = backup
-        self.timeout = max(timeout, 10)  # Minimum 10 second timeout
+        self.timeout = max(timeout, 10)
         self.last_provider = "unknown"
         self.call_count = 0
         self.consecutive_local_failures = 0
-        self.max_consecutive_failures = 2  # Switch to backup after 2 failures
+        self.max_consecutive_failures = 2
+        self.force_backup_next = False
+        
+        # Keywords that indicate need for web search or real-time data
+        self.web_keywords = [
+            'current', 'latest', 'recent', 'today', 'now', 'real-time', 'live',
+            'stock price', 'weather', 'news', 'search', 'web', 'internet',
+            'reach out to the web', 'look up', 'find out', 'check online',
+            'go to the web', 'search the web', '.com', '.org', '.net', '.gov', '.edu',
+            'website', 'site', 'page', 'url'
+        ]
+        
+    def _should_force_backup(self, messages: List[Dict[str, Any]]) -> bool:
+        """Determine if we should force backup based on message content"""
+        if not messages:
+            return False
+            
+        # Check the last user message
+        last_user_msg = None
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                last_user_msg = msg.get("content", "").lower()
+                break
+        
+        if not last_user_msg:
+            return False
+        
+        # Force backup for web-related queries
+        for keyword in self.web_keywords:
+            if keyword in last_user_msg:
+                logger.info(f"Forcing backup due to web keyword: '{keyword}'")
+                return True
+        
+        return False
         
     def complete(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
-        """Synchronous completion with failover logic and serialization fixes"""
+        """Completion with improved failover logic"""
         self.call_count += 1
         logger.info(f"=== Failover complete() call #{self.call_count} ===")
         
-        # Quick heuristic: if this looks like a follow-up after tool execution, 
-        # and we have consecutive failures, go straight to backup
+        # Check if backup is manually forced
+        if self.force_backup_next:
+            logger.info("🔄 Manual backup override - using frontier model")
+            self.force_backup_next = False
+            return self._try_backup(messages, tools, **kwargs)
+        
+        # Check if we should force backup for web queries
+        if self._should_force_backup(messages):
+            logger.info("🌐 Web-related query detected - using backup provider")
+            logger.info(f"🔧 Passing {len(tools) if tools else 0} tools to backup provider")
+            return self._try_backup(messages, tools, **kwargs)
+        
+        # Quick heuristic for tool follow-ups
         has_tool_results = any(msg.get("role") == "tool" for msg in messages[-3:])
         if has_tool_results and self.consecutive_local_failures >= 2:
             logger.info("Multiple recent failures + tool results - using backup immediately")
             return self._try_backup(messages, tools, **kwargs)
         
-        # Try primary (local) first with reduced timeout for tool follow-ups
+        # Try primary with reduced timeout for tool follow-ups
         if has_tool_results:
             logger.info("Detected tool response scenario - using reduced timeout")
-            timeout = min(self.timeout, 8)  # Max 8 seconds for follow-ups
+            timeout = min(self.timeout, 8)
         else:
             timeout = self.timeout
             
         try:
             start_time = time.time()
             
-            # Use a simple timeout mechanism with threading
-            import concurrent.futures
-            
             with concurrent.futures.ThreadPoolExecutor() as executor:
                 future = executor.submit(self._try_primary_with_tools, messages, tools, **kwargs)
                 try:
                     result = future.result(timeout=timeout)
                     elapsed = time.time() - start_time
+                    
+                    # Check if local model provided a useful response
+                    if self._is_poor_local_response(result, messages):
+                        logger.warning("🔄 Local model gave poor response for this query - trying backup")
+                        self.consecutive_local_failures += 1
+                        return self._try_backup(messages, tools, **kwargs)
+                    
                     logger.info(f"✅ Primary model succeeded in {elapsed:.1f}s")
                     self.last_provider = "local"
                     self.consecutive_local_failures = 0
                     return result
+                    
                 except concurrent.futures.TimeoutError:
                     elapsed = time.time() - start_time
                     logger.warning(f"🕒 Primary model timed out after {elapsed:.1f}s → fallback")
                     self.consecutive_local_failures += 1
-                    # Cancel the future
                     future.cancel()
             
         except Exception as e:
@@ -116,9 +163,41 @@ class FailoverChatProvider:
         # Fallback to backup
         return self._try_backup(messages, tools, **kwargs)
     
+    def _is_poor_local_response(self, result, messages: List[Dict[str, Any]]) -> bool:
+        """Check if local model response is inadequate for the query"""
+        if not result or not result.choices:
+            return True
+            
+        content = result.choices[0].message.content or ""
+        
+        # Get the last user message to analyze
+        last_user_msg = ""
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                last_user_msg = msg.get("content", "").lower()
+                break
+        
+        # If user asked for current/web info but got generic response
+        for keyword in self.web_keywords:
+            if keyword in last_user_msg:
+                # Local model shouldn't be able to provide current web data
+                if any(phrase in content.lower() for phrase in [
+                    "i don't have access", "i can't browse", "i cannot access",
+                    "as of my last update", "i don't have real-time"
+                ]):
+                    return False  # This is actually a good response from local model
+                elif any(phrase in content.lower() for phrase in [
+                    "the current", "as of today", "latest price is"
+                ]):
+                    # Local model claiming to have current data - this is wrong
+                    logger.warning("Local model claiming to have current data it doesn't have")
+                    return True
+        
+        return False
+    
     def _try_primary_with_tools(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
         """Try primary provider with tool call parsing"""
-        # Use the primary provider WITHOUT passing tools (local models don't support OpenAI format)
+        # Use the primary provider WITHOUT passing tools
         completion = self.primary.complete(messages=messages, **kwargs)
         
         # Extract the response content
@@ -129,34 +208,35 @@ class FailoverChatProvider:
         
         if tool_calls:
             logger.info(f"🔧 Parsed {len(tool_calls)} tool calls from local model text")
-            # Create a mock completion with tool calls
             mock_message = MockMessage(content="", tool_calls=tool_calls)
             mock_choice = MockChoice(mock_message, finish_reason="tool_calls")
             logger.info("✅ Local model with parsed tool calls")
             return MockCompletion([mock_choice])
         else:
-            # Regular text response
             logger.info("✅ Local model with text response")
             return completion
     
     def _try_backup(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
-        """Try backup provider with proper error handling and serialization fixes"""
+        """Try backup provider with proper error handling"""
         try:
             start_time = time.time()
             
             # Clean up conversation history for OpenAI compatibility
             clean_messages = self._clean_messages_for_openai(messages)
             
+            # ADDITIONAL VALIDATION: Check for orphaned tool calls
+            validated_messages = self._validate_tool_message_pairs(clean_messages)
+            
             completion = self.backup.complete(
-                messages=clean_messages,
+                messages=validated_messages,
                 tools=tools,
                 **kwargs
             )
             
             elapsed = time.time() - start_time
-            logger.info(f"Used backup model in {elapsed:.1f}s. Response: {completion.choices[0].message.content[:100]}...")
+            logger.info(f"🔄 Used backup model in {elapsed:.1f}s")
             self.last_provider = "backup"
-            self.consecutive_local_failures = 0  # Reset on successful backup
+            self.consecutive_local_failures = 0
             return completion
             
         except Exception as e:
@@ -166,25 +246,81 @@ class FailoverChatProvider:
             mock_choice = MockChoice(mock_message)
             return MockCompletion([mock_choice])
     
+    def _validate_tool_message_pairs(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Ensure all tool_calls have corresponding tool responses and vice versa"""
+        validated = []
+        skip_until_next_user = False
+        
+        for i, msg in enumerate(messages):
+            # Skip orphaned tool messages
+            if skip_until_next_user:
+                if msg.get("role") == "user":
+                    skip_until_next_user = False
+                    validated.append(msg)
+                else:
+                    logger.debug(f"Skipping orphaned message: {msg.get('role', 'unknown')}")
+                continue
+            
+            # Handle assistant messages with tool calls
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                tool_call_ids = set()
+                for tc in msg["tool_calls"]:
+                    if isinstance(tc, dict) and "id" in tc:
+                        tool_call_ids.add(tc["id"])
+                
+                # Look ahead for tool responses
+                found_responses = set()
+                j = i + 1
+                tool_messages = []
+                
+                while j < len(messages) and messages[j].get("role") == "tool":
+                    tool_msg = messages[j]
+                    tool_call_id = tool_msg.get("tool_call_id")
+                    if tool_call_id in tool_call_ids:
+                        found_responses.add(tool_call_id)
+                        tool_messages.append(tool_msg)
+                    j += 1
+                
+                # Only include if all tool calls have responses
+                if found_responses == tool_call_ids:
+                    validated.append(msg)
+                    validated.extend(tool_messages)
+                else:
+                    logger.warning(f"Removing assistant message with incomplete tool responses")
+                    logger.warning(f"Expected: {tool_call_ids}, Found: {found_responses}")
+                    skip_until_next_user = True
+                
+                # Skip the tool messages we already processed
+                messages = messages[j:]
+                i = -1  # Will be incremented to 0
+                
+            # Handle regular messages
+            elif msg.get("role") in ["system", "user", "assistant"]:
+                validated.append(msg)
+            
+            # Skip orphaned tool messages
+            elif msg.get("role") == "tool":
+                logger.warning(f"Skipping orphaned tool message: {msg.get('tool_call_id', 'unknown')}")
+        
+        return validated
+    
     def _clean_messages_for_openai(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Clean and validate messages for OpenAI API compatibility with serialization fixes"""
+        """Clean and validate messages for OpenAI API compatibility"""
         clean_messages = []
         
         for i, msg in enumerate(messages):
             if isinstance(msg, dict):
                 clean_msg = dict(msg)
                 
-                # Handle tool_calls serialization - FIXED VERSION
+                # Handle tool_calls serialization
                 if 'tool_calls' in clean_msg and clean_msg['tool_calls']:
                     clean_tool_calls = []
                     for tc in clean_msg['tool_calls']:
                         if isinstance(tc, dict):
-                            # Already a dictionary
                             clean_tool_calls.append(tc)
                         elif hasattr(tc, 'to_dict'):
-                            # Has serialization method
                             clean_tool_calls.append(tc.to_dict())
-                        elif hasattr(tc, 'id'):  # MockToolCall or similar object
+                        elif hasattr(tc, 'id'):
                             clean_tc = {
                                 'id': tc.id,
                                 'type': getattr(tc, 'type', 'function'),
@@ -195,8 +331,7 @@ class FailoverChatProvider:
                             }
                             clean_tool_calls.append(clean_tc)
                         else:
-                            # Try to convert to string representation
-                            logger.warning(f"Unknown tool call type: {type(tc)}, converting to string")
+                            logger.warning(f"Unknown tool call type: {type(tc)}")
                             clean_tc = {
                                 'id': str(getattr(tc, 'id', f'unknown_{i}')),
                                 'type': 'function',
@@ -210,77 +345,17 @@ class FailoverChatProvider:
                 
                 clean_messages.append(clean_msg)
             else:
-                # Convert non-dict messages
                 clean_messages.append({"role": "assistant", "content": str(msg)})
         
-        # Validate tool call/response pairs with better error handling
-        validated_messages = []
-        skip_orphaned_tools = False
-        
-        for i, msg in enumerate(clean_messages):
-            if skip_orphaned_tools and msg.get('role') == 'tool':
-                logger.debug(f"Skipping orphaned tool message: {msg.get('tool_call_id', 'unknown')}")
-                continue
-            
-            skip_orphaned_tools = False
-            
-            if msg.get('role') == 'assistant' and msg.get('tool_calls'):
-                # Check if subsequent tool responses exist
-                tool_call_ids = set()
-                for tc in msg['tool_calls']:
-                    if isinstance(tc, dict) and 'id' in tc:
-                        tool_call_ids.add(tc['id'])
-                
-                found_responses = set()
-                
-                # Look ahead for tool responses
-                j = i + 1
-                while j < len(clean_messages) and clean_messages[j].get('role') == 'tool':
-                    tool_msg = clean_messages[j]
-                    tool_call_id = tool_msg.get('tool_call_id')
-                    if tool_call_id in tool_call_ids:
-                        found_responses.add(tool_call_id)
-                    j += 1
-                
-                # If we're missing tool responses, remove orphaned tool_calls
-                if len(found_responses) < len(tool_call_ids):
-                    missing_ids = tool_call_ids - found_responses
-                    logger.warning(f"Removing orphaned tool_calls: {missing_ids}")
-                    
-                    # Filter out orphaned tool calls
-                    valid_tool_calls = [
-                        tc for tc in msg['tool_calls'] 
-                        if isinstance(tc, dict) and tc.get('id') in found_responses
-                    ]
-                    
-                    clean_msg = dict(msg)
-                    if valid_tool_calls:
-                        clean_msg['tool_calls'] = valid_tool_calls
-                    else:
-                        # Remove tool_calls entirely if none are valid
-                        clean_msg.pop('tool_calls', None)
-                        if not clean_msg.get('content'):
-                            clean_msg['content'] = "I'll help you with that."
-                    
-                    validated_messages.append(clean_msg)
-                    
-                    # Skip orphaned tool responses
-                    if len(found_responses) != len(tool_call_ids):
-                        skip_orphaned_tools = True
-                else:
-                    validated_messages.append(msg)
-            else:
-                validated_messages.append(msg)
-        
-        return validated_messages
+        return clean_messages
     
     def _extract_tool_calls_from_text(self, text: str) -> List[MockToolCall]:
-        """Extract tool calls from text response with improved parsing and deduplication"""
+        """Extract tool calls from text response with improved parsing"""
         if not text or not text.strip():
             return []
         
         tool_calls = []
-        seen_calls = set()  # Track duplicates
+        seen_calls = set()
         
         # Pattern 1: Direct JSON object
         json_pattern = r'\{"name":\s*"([^"]+)",\s*"arguments":\s*(\{[^}]*\})\}'
@@ -307,7 +382,6 @@ class FailoverChatProvider:
                     # Create a signature for deduplication
                     call_signature = f"{name}:{json.dumps(args_dict, sort_keys=True)}"
                     
-                    # Skip if we've already seen this exact call
                     if call_signature in seen_calls:
                         logger.debug(f"Skipping duplicate tool call: {call_signature}")
                         continue
@@ -319,26 +393,10 @@ class FailoverChatProvider:
                     tool_call = MockToolCall(tool_id, name, args_str)
                     tool_calls.append(tool_call)
                     
-                    # Limit to maximum 3 unique tool calls to prevent abuse
                     if len(tool_calls) >= 3:
                         break
                     
                 except (json.JSONDecodeError, IndexError):
                     continue
-        
-        # Additional safety: if we have multiple identical calls, keep only the first
-        if len(tool_calls) > 1:
-            unique_calls = []
-            seen_names_args = set()
-            
-            for tc in tool_calls:
-                name_args = f"{tc.function.name}:{tc.function.arguments}"
-                if name_args not in seen_names_args:
-                    unique_calls.append(tc)
-                    seen_names_args.add(name_args)
-            
-            if len(unique_calls) != len(tool_calls):
-                logger.info(f"Deduplicated tool calls: {len(tool_calls)} → {len(unique_calls)}")
-                tool_calls = unique_calls
         
         return tool_calls

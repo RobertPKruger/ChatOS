@@ -33,6 +33,18 @@ FRONTIER_CHAT_MODEL=gpt-4o
 PROCESSING_TIMEOUT=60.0
 STUCK_CHECK_INTERVAL=5.0
 
+# Optional - For better stock market data (free tier available)
+# Get from: https://www.alphavantage.co/support/#api-key
+ALPHA_VANTAGE_API_KEY=
+
+# Optional - For better news search (free tier available)  
+# Get from: https://newsapi.org/register
+NEWS_API_KEY=
+
+# Optional - For better weather data (free tier available)
+# Get from: https://openweathermap.org/api
+OPENWEATHER_API_KEY=
+
 # Api key
 OPENAI_API_KEY= PASTE KEY HERE.
 
