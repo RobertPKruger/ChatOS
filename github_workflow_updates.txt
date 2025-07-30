@@ -1,0 +1,15 @@
+# UPDATE FOR .github/workflows/chatos-tests.yml
+# Replace the test running sections with:
+
+    - name: Run organized tests
+      run: |
+        python run_tests_organized.py
+    
+    - name: Run performance monitor
+      run: |
+        python tests/monitor_fixed_simple.py
+    
+    - name: Run test suite  
+      run: |
+        cd tests
+        python test_suite.py

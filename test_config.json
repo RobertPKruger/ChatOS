@@ -1,0 +1,22 @@
+{
+  "thresholds": {
+    "pct_local_use": 50,
+    "avg_response_time_seconds": 5.0,
+    "tool_success_rate": 85,
+    "transcription_accuracy": 90,
+    "max_memory_mb": 500
+  },
+  "test_settings": {
+    "mock_audio": true,
+    "mock_openai": false,
+    "mock_ollama": false,
+    "enable_integration_tests": true,
+    "test_timeout_seconds": 30
+  },
+  "monitoring": {
+    "track_metrics": true,
+    "save_results": true,
+    "results_file": "test_results.json",
+    "alert_on_regression": true
+  }
+}

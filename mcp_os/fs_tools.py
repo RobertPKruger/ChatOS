@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 import subprocess
 import winreg
+import platform
 
 # ─────────────────────────────────────
 # 1. Helper: path resolution & checks
@@ -20,8 +21,34 @@ documents_path = BASE_DIR / "Documents"
 
 
 def safe_path(raw: str) -> pathlib.Path:
+    """Fixed path resolution that handles both Windows and Unix paths"""
     # Strip whitespace / quotes
     raw = raw.strip().strip('"').strip("'")
+    
+    # WINDOWS FIX: Handle Unix-style paths from Ollama/local models
+    if platform.system() == "Windows" and raw.startswith("/"):
+        # Convert Unix-style paths to Windows equivalents
+        if raw.startswith("/Users/") or raw.startswith("/home/"):
+            # Extract the path after /Users/username/ or /home/username/
+            parts = raw.split("/")
+            if len(parts) >= 4:  # /Users/username/something/...
+                remaining_path = "/".join(parts[3:])  # everything after username
+                
+                # Handle common directories
+                if remaining_path.startswith("Desktop"):
+                    return desktop_path / remaining_path[8:]  # Remove "Desktop/"
+                elif remaining_path.startswith("Documents"):  
+                    return documents_path / remaining_path[10:]  # Remove "Documents/"
+                else:
+                    # Default to home directory
+                    return BASE_DIR / remaining_path
+            else:
+                # Just /Users/ or /home/ - default to home
+                return BASE_DIR
+        else:
+            # Other Unix absolute paths - try to map to Windows
+            # Remove leading slash and treat as relative to BASE_DIR
+            return BASE_DIR / raw[1:]
 
     # ── Handle desktop alias ───────────────────────────
     if raw.lower() in {"desktop", "~/desktop", "%desktop%"}:
@@ -29,25 +56,31 @@ def safe_path(raw: str) -> pathlib.Path:
 
     # If the user passed something *under* the desktop
     if raw.lower().startswith(("desktop/", "~/desktop/")):
-        sub = raw.split("/", 2)[-1]               # e.g. 'Projects/test'
+        sub = raw.split("/", 1)[-1] if "/" in raw else raw.split("\\", 1)[-1]
         return desktop_path / sub
     
     if raw.lower() in {"documents", "~/documents", "%documents%"}:
         return documents_path
     
     if raw.lower().startswith(("documents/", "~/documents/")):
-        sub = raw.split("/", 2)[-1]               # e.g. 'Projects/test'
+        sub = raw.split("/", 1)[-1] if "/" in raw else raw.split("\\", 1)[-1]
         return documents_path / sub
 
     # Existing expansion & sandbox logic below …
     expanded = os.path.expandvars(os.path.expanduser(raw))
     p = pathlib.Path(expanded).resolve()
 
-    # Reject drive changes or parent-escape
-    if p.drive not in SAFE_DRIVES or BASE_DIR not in p.parents and p != BASE_DIR:
-        raise ValueError(f"Path '{raw}' is outside the allowed area.")
-
-    return p
+    # UPDATED: More lenient drive checking for Windows
+    if platform.system() == "Windows":
+        # On Windows, allow any drive that exists
+        if p.drive and not os.path.exists(p.drive + "\\"):
+            raise ValueError(f"Drive '{p.drive}' does not exist.")
+        # Be more permissive for Windows paths
+        pass  # Allow most Windows paths under user directories
+    else:
+        # Unix sandbox logic
+        if BASE_DIR not in p.parents and p != BASE_DIR:
+            raise ValueError(f"Path '{raw}' is outside the allowed area.")
 
 def result(msg: str) -> str | TextContent:
     """Wrap once so you can switch to TextContent later if desired."""

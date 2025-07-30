@@ -1,0 +1,16 @@
+{
+  "thresholds": {
+    "pct_local_use": 50,
+    "avg_response_time_seconds": 5.0,
+    "tool_success_rate": 85,
+    "chatos_memory_mb": 200,
+    "system_memory_percent": 85,
+    "cpu_usage_percent": 80,
+    "disk_usage_percent": 90
+  },
+  "monitoring": {
+    "check_interval_seconds": 60,
+    "alert_cooldown_minutes": 30,
+    "track_process_memory": true
+  }
+}

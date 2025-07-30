@@ -1,0 +1,21 @@
+{
+  "thresholds": {
+    "system_memory_percent": 85,
+    "pct_local_use": 50,
+    "avg_response_time_seconds": 5.0,
+    "tool_success_rate": 85,
+    "memory_usage_mb": 200,
+    "cpu_usage_percent": 80,
+    "disk_usage_percent": 90
+  },
+  "test_settings": {
+    "mock_audio": true,
+    "enable_integration_tests": true
+  },
+  "monitoring": {
+    "check_interval_seconds": 60,
+    "track_metrics": true,
+    "save_results": true,
+    "results_file": "test_results.json"
+  }
+}

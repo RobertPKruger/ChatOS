@@ -1,0 +1,14 @@
+﻿{
+  "metadata": {
+    "created": "2024-12-19T10:00:00.000Z",
+    "version": "1.0.0"
+  },
+  "performance_targets": {
+    "pct_local_use": 50,
+    "avg_response_time_seconds": 5.0,
+    "tool_success_rate": 85
+  },
+  "historical_data": {
+    "runs": []
+  }
+}
