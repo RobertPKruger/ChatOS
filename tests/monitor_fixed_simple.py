@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 import psutil
-import json
 import os
-from datetime import datetime
 
 class SimplePerformanceMonitor:
     def __init__(self):
