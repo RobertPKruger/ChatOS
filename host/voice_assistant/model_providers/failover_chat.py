@@ -1,3 +1,8 @@
+# voice_assistant/model_providers/failover_chat.py - Enhanced with Ollama retries
+"""
+Enhanced failover chat provider with configurable Ollama retry logic
+"""
+
 import json
 import logging
 import re
@@ -51,23 +56,29 @@ class MockCompletion:
         self.choices = choices
 
 class FailoverChatProvider:
-    """OPTIMIZED failover provider with smart routing and aggressive timeouts"""
+    """Enhanced chat provider with configurable Ollama retry logic"""
     
-    def __init__(self, primary: ChatCompletionProvider, backup: ChatCompletionProvider, timeout: float = 15):
+    def __init__(self, primary: ChatCompletionProvider, backup: ChatCompletionProvider, 
+                 timeout: float = 15, max_retries: int = 3, retry_delay: float = 1.0):
         self.primary = primary
         self.backup = backup
         self.timeout = max(timeout, 10)
+        self.max_retries = max_retries  # NEW: Maximum number of retries for Ollama
+        self.retry_delay = retry_delay  # NEW: Delay between retries (seconds)
         self.last_provider = "unknown"
         self.call_count = 0
         self.consecutive_local_failures = 0
         self.max_consecutive_failures = 2
         self.force_backup_next = False
         
-        # OPTIMIZATION 1: Performance tracking for adaptive timeouts
-        self.local_response_times = []  # Track last 10 response times
-        self.max_history = 10
+        # Track retry statistics
+        self.retry_stats = {
+            "total_retries": 0,
+            "successful_retries": 0,
+            "failed_after_retries": 0
+        }
         
-        # OPTIMIZATION 2: Immediate backup triggers (keywords)
+        # Keywords that indicate need for web search or real-time data
         self.web_keywords = [
             'current', 'latest', 'recent', 'today', 'now', 'real-time', 'live',
             'stock price', 'weather', 'news', 'search', 'web', 'internet',
@@ -76,84 +87,6 @@ class FailoverChatProvider:
             'website', 'site', 'page', 'url'
         ]
         
-        # OPTIMIZATION 3: Fast local patterns (simple app launches)
-        self.fast_local_patterns = [
-            r'(?:please\s+)?(?:open|launch|start|run)\s+(?:microsoft\s+)?(excel|word|notepad|chrome|calculator)(?:\s+(?:for\s+me|please))?',
-            r'(?:please\s+)?(?:close|quit|exit)\s+(?:microsoft\s+)?(excel|word|notepad|chrome|calculator)',
-            r'(?:open|launch)\s+(?:file\s+)?explorer',
-            r'(?:create|make)\s+(?:a\s+)?(?:file|folder|directory)',
-        ]
-        
-        # OPTIMIZATION 4: Precompiled regex for speed  
-        self.fast_local_regex = [re.compile(pattern, re.IGNORECASE) for pattern in self.fast_local_patterns]
-        
-        # OPTIMIZATION 5: Thread pool for non-blocking operations
-        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="failover")
-        
-    def __del__(self):
-        """Cleanup thread pool"""
-        if hasattr(self, '_executor'):
-            self._executor.shutdown(wait=False)
-    
-    def _get_adaptive_timeout(self, request_type: str = "normal") -> float:
-        """Calculate adaptive timeout based on recent performance"""
-        if request_type == "simple_app":
-            # Very aggressive timeout for simple app launches
-            base_timeout = 3.0
-        elif request_type == "tool_followup":
-            # Reduced timeout for tool follow-ups (they're usually faster)
-            base_timeout = 4.0
-        else:
-            base_timeout = self.timeout
-        
-        # OPTIMIZATION: Adjust based on recent performance
-        if len(self.local_response_times) >= 3:
-            avg_response = sum(self.local_response_times) / len(self.local_response_times)
-            
-            # If local model has been consistently slow, reduce timeout more aggressively
-            if avg_response > 4.0:
-                adaptive_timeout = min(base_timeout * 0.6, 3.0)  # Very aggressive
-                logger.debug(f"⚡ Adaptive timeout reduced to {adaptive_timeout:.1f}s (avg: {avg_response:.1f}s)")
-            elif avg_response > 2.0:
-                adaptive_timeout = base_timeout * 0.8  # Moderately aggressive
-            else:
-                adaptive_timeout = base_timeout  # Normal timeout
-                
-            return max(adaptive_timeout, 2.0)  # Never go below 2 seconds
-        
-        return base_timeout
-    
-    def _record_local_response_time(self, duration: float):
-        """Track local model response times for adaptive timeout"""
-        self.local_response_times.append(duration)
-        if len(self.local_response_times) > self.max_history:
-            self.local_response_times.pop(0)  # Keep only recent times
-    
-    def _is_simple_app_launch(self, messages: List[Dict[str, Any]]) -> bool:
-        """FAST detection of simple app launches using precompiled regex"""
-        if not messages:
-            return False
-            
-        last_user_msg = None
-        for msg in reversed(messages):
-            if msg.get("role") == "user":
-                last_user_msg = msg.get("content", "")
-                break
-        
-        if not last_user_msg:
-            return False
-        
-        # OPTIMIZATION: Use precompiled regex for speed
-        for pattern in self.fast_local_regex:
-            if pattern.search(last_user_msg):
-                # Ensure it's not a complex request
-                complex_indicators = ['current', 'search', 'find me', 'get me', 'tell me', 'what', 'how', 'when', 'which']
-                lower_msg = last_user_msg.lower()
-                if not any(indicator in lower_msg for indicator in complex_indicators):
-                    return True
-        
-        return False
-    
     def _should_force_backup(self, messages: List[Dict[str, Any]]) -> bool:
         """Determine if we should force backup based on message content"""
         if not messages:
@@ -177,77 +110,97 @@ class FailoverChatProvider:
         
         return False
     
+    def _retry_ollama_with_backoff(self, messages: List[Dict[str, Any]], 
+                                   tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
+        """Retry Ollama with exponential backoff"""
+        last_exception = None
+        
+        for attempt in range(self.max_retries + 1):  # +1 for initial attempt
+            try:
+                if attempt > 0:
+                    # Calculate delay with exponential backoff
+                    delay = self.retry_delay * (2 ** (attempt - 1))
+                    logger.info(f"🔄 Ollama retry attempt {attempt}/{self.max_retries} after {delay:.1f}s delay")
+                    time.sleep(delay)
+                    self.retry_stats["total_retries"] += 1
+                
+                # Try primary provider
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(self._try_primary_with_tools, messages, tools, **kwargs)
+                    result = future.result(timeout=self.timeout)
+                    
+                    if attempt > 0:
+                        self.retry_stats["successful_retries"] += 1
+                        logger.info(f"✅ Ollama succeeded on retry attempt {attempt}/{self.max_retries}")
+                    
+                    return result
+                    
+            except concurrent.futures.TimeoutError as e:
+                last_exception = f"Timeout after {self.timeout}s"
+                logger.warning(f"🕒 Ollama attempt {attempt + 1} timed out")
+                
+            except Exception as e:
+                last_exception = str(e)
+                logger.warning(f"💥 Ollama attempt {attempt + 1} failed: {str(e)[:100]}")
+                
+                # Check if this is a connection error that might benefit from retry
+                error_str = str(e).lower()
+                if not any(recoverable in error_str for recoverable in [
+                    'connection', 'timeout', 'network', 'unavailable', 'refused'
+                ]):
+                    # Non-recoverable error, don't retry
+                    logger.info(f"🚫 Non-recoverable error, skipping remaining retries: {e}")
+                    break
+        
+        # All retries exhausted
+        self.retry_stats["failed_after_retries"] += 1
+        logger.warning(f"❌ Ollama failed after {self.max_retries} retries. Last error: {last_exception}")
+        raise Exception(f"Ollama failed after {self.max_retries} retries: {last_exception}")
+        
     def complete(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
-        """OPTIMIZED completion with smart routing and adaptive timeouts"""
+        """Completion with enhanced Ollama retry logic"""
         self.call_count += 1
         logger.info(f"=== Failover complete() call #{self.call_count} ===")
         
-        # OPTIMIZATION 1: Immediate backup for web queries (no local attempt)
-        if self._should_force_backup(messages):
-            logger.info("🌐 Web-related query detected - using backup provider")
-            logger.info(f"🔧 Passing {len(tools) if tools else 0} tools to backup provider")
-            return self._try_backup(messages, tools, **kwargs)
-        
-        # OPTIMIZATION 2: Manual backup override
+        # Check if backup is manually forced
         if self.force_backup_next:
             logger.info("🔄 Manual backup override - using frontier model")
             self.force_backup_next = False
             return self._try_backup(messages, tools, **kwargs)
         
-        # OPTIMIZATION 3: Determine request type for adaptive timeout
-        request_type = "normal"
-        has_tool_results = any(msg.get("role") == "tool" for msg in messages[-3:])
-        
-        if self._is_simple_app_launch(messages):
-            request_type = "simple_app"
-            logger.info("🚀 Simple app launch detected - using aggressive timeout")
-        elif has_tool_results:
-            request_type = "tool_followup"
-            logger.info("Detected tool response scenario - using reduced timeout")
-        
-        # OPTIMIZATION 4: Skip local if too many recent failures
-        if self.consecutive_local_failures >= self.max_consecutive_failures:
-            logger.info("🔄 Too many recent local failures - using backup immediately")
+        # Check if we should force backup for web queries
+        if self._should_force_backup(messages):
+            logger.info("🌐 Web-related query detected - using backup provider")
+            logger.info(f"🔧 Passing {len(tools) if tools else 0} tools to backup provider")
             return self._try_backup(messages, tools, **kwargs)
         
-        # OPTIMIZATION 5: Try primary with adaptive timeout
-        adaptive_timeout = self._get_adaptive_timeout(request_type)
+        # Quick heuristic for tool follow-ups
+        has_tool_results = any(msg.get("role") == "tool" for msg in messages[-3:])
+        if has_tool_results and self.consecutive_local_failures >= 2:
+            logger.info("Multiple recent failures + tool results - using backup immediately")
+            return self._try_backup(messages, tools, **kwargs)
         
+        # Try primary with retries
         try:
             start_time = time.time()
+            result = self._retry_ollama_with_backoff(messages, tools, **kwargs)
             
-            # Use existing thread pool instead of creating new one each time
-            future = self._executor.submit(self._try_primary_with_tools, messages, tools, **kwargs)
+            elapsed = time.time() - start_time
             
-            try:
-                result = future.result(timeout=adaptive_timeout)
-                elapsed = time.time() - start_time
-                
-                # OPTIMIZATION 6: Track performance for future adaptive timeouts
-                self._record_local_response_time(elapsed)
-                
-                # Check if local model provided a useful response
-                if self._is_poor_local_response(result, messages):
-                    logger.warning("🔄 Local model gave poor response for this query - trying backup")
-                    self.consecutive_local_failures += 1
-                    return self._try_backup(messages, tools, **kwargs)
-                
-                logger.info(f"✅ Primary model succeeded in {elapsed:.1f}s")
-                self.last_provider = "local"
-                self.consecutive_local_failures = 0  # Reset failure count on success
-                return result
-                
-            except concurrent.futures.TimeoutError:
-                elapsed = time.time() - start_time
-                logger.warning(f"🕒 Primary model timed out after {elapsed:.1f}s → fallback")
+            # Check if local model provided a useful response
+            if self._is_poor_local_response(result, messages):
+                logger.warning("🔄 Local model gave poor response for this query - trying backup")
                 self.consecutive_local_failures += 1
-                
-                # OPTIMIZATION 7: Don't wait for future to cancel, just move on
-                # The future will complete in background but we don't wait
-                
+                return self._try_backup(messages, tools, **kwargs)
+            
+            logger.info(f"✅ Primary model succeeded in {elapsed:.1f}s")
+            self.last_provider = "local"
+            self.consecutive_local_failures = 0
+            return result
+            
         except Exception as e:
             elapsed = time.time() - start_time if 'start_time' in locals() else 0
-            logger.warning(f"💥 Local LLM failed → fallback. Reason: {str(e)[:100]} (after {elapsed:.1f}s)")
+            logger.warning(f"💥 All Ollama retries exhausted → fallback. Total time: {elapsed:.1f}s")
             self.consecutive_local_failures += 1
         
         # Fallback to backup
@@ -286,78 +239,39 @@ class FailoverChatProvider:
         return False
     
     def _try_primary_with_tools(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
-        """Try primary provider with tool call parsing - OPTIMIZED"""
+        """Try primary provider with tool call parsing"""
         # Use the primary provider WITHOUT passing tools
         completion = self.primary.complete(messages=messages, **kwargs)
         
         # Extract the response content
         content = completion.choices[0].message.content or ""
         
-        # OPTIMIZATION: Faster tool call extraction with early exit
-        tool_calls = self._extract_tool_calls_from_text_fast(content)
+        # Check if response contains tool calls (JSON format)
+        tool_calls = self._extract_tool_calls_from_text(content)
         
         if tool_calls:
             logger.info(f"🔧 Parsed {len(tool_calls)} tool calls from local model text")
             mock_message = MockMessage(content="", tool_calls=tool_calls)
             mock_choice = MockChoice(mock_message, finish_reason="tool_calls")
+            logger.info("✅ Local model with parsed tool calls")
             return MockCompletion([mock_choice])
         else:
+            logger.info("✅ Local model with text response")
             return completion
     
-    def _extract_tool_calls_from_text_fast(self, text: str) -> List[MockToolCall]:
-        """OPTIMIZED tool call extraction with early exit and better patterns"""
-        if not text or not text.strip():
-            return []
-        
-        tool_calls = []
-        
-        # OPTIMIZATION: Single comprehensive pattern for speed
-        # Look for {"name": "...", "arguments": {...}}
-        comprehensive_pattern = r'\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})\s*\}'
-        
-        matches = re.finditer(comprehensive_pattern, text, re.IGNORECASE | re.MULTILINE)
-        
-        seen_calls = set()
-        for match in matches:
-            try:
-                name = match.group(1)
-                args_str = match.group(2)
-                
-                # Validate JSON arguments
-                args_dict = json.loads(args_str)
-                
-                # Create a signature for deduplication
-                call_signature = f"{name}:{json.dumps(args_dict, sort_keys=True)}"
-                
-                if call_signature in seen_calls:
-                    continue
-                
-                seen_calls.add(call_signature)
-                
-                # Create tool call with unique ID
-                tool_id = f"call_{len(tool_calls)}_{int(time.time() * 1000) % 10000}"
-                tool_call = MockToolCall(tool_id, name, args_str)
-                tool_calls.append(tool_call)
-                
-                # OPTIMIZATION: Early exit after finding 3 tool calls
-                if len(tool_calls) >= 3:
-                    break
-                    
-            except (json.JSONDecodeError, IndexError):
-                continue
-        
-        return tool_calls
-    
     def _try_backup(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
-        """Try backup provider with OPTIMIZED message cleaning"""
+        """Try backup provider with proper error handling"""
         try:
             start_time = time.time()
             
-            # OPTIMIZATION: Faster message cleaning
-            clean_messages = self._clean_messages_for_openai_fast(messages)
+            # Clean up conversation history for OpenAI compatibility
+            clean_messages = self._clean_messages_for_openai(messages)
+            
+            # ADDITIONAL VALIDATION: Check for orphaned tool calls
+            validated_messages = self._validate_tool_message_pairs(clean_messages)
             
             completion = self.backup.complete(
-                messages=clean_messages,
+                messages=validated_messages,
                 tools=tools,
                 **kwargs
             )
@@ -365,7 +279,7 @@ class FailoverChatProvider:
             elapsed = time.time() - start_time
             logger.info(f"🔄 Used backup model in {elapsed:.1f}s")
             self.last_provider = "backup"
-            self.consecutive_local_failures = 0  # Reset on successful backup
+            self.consecutive_local_failures = 0
             return completion
             
         except Exception as e:
@@ -375,67 +289,171 @@ class FailoverChatProvider:
             mock_choice = MockChoice(mock_message)
             return MockCompletion([mock_choice])
     
-    def _clean_messages_for_openai_fast(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """OPTIMIZED message cleaning - faster validation"""
-        clean_messages = []
+    def get_retry_stats(self) -> Dict[str, Any]:
+        """Get retry statistics for monitoring"""
+        return {
+            **self.retry_stats,
+            "retry_success_rate": (
+                self.retry_stats["successful_retries"] / max(self.retry_stats["total_retries"], 1) * 100
+            ),
+            "config": {
+                "max_retries": self.max_retries,
+                "retry_delay": self.retry_delay,
+                "timeout": self.timeout
+            }
+        }
+    
+    def _validate_tool_message_pairs(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Ensure all tool_calls have corresponding tool responses and vice versa"""
+        validated = []
+        skip_until_next_user = False
         
-        # OPTIMIZATION: Process messages in reverse to quickly identify issues
-        valid_roles = {"system", "user", "assistant", "tool"}
-        
-        for msg in messages:
-            if not isinstance(msg, dict):
+        for i, msg in enumerate(messages):
+            # Skip orphaned tool messages
+            if skip_until_next_user:
+                if msg.get("role") == "user":
+                    skip_until_next_user = False
+                    validated.append(msg)
+                else:
+                    logger.debug(f"Skipping orphaned message: {msg.get('role', 'unknown')}")
                 continue
-                
-            role = msg.get("role")
-            if role not in valid_roles:
-                continue
             
-            clean_msg = {"role": role}
-            
-            # Handle content
-            if "content" in msg:
-                clean_msg["content"] = msg["content"]
-            
-            # Handle tool_calls for assistant messages
-            if role == "assistant" and "tool_calls" in msg and msg["tool_calls"]:
-                clean_tool_calls = []
+            # Handle assistant messages with tool calls
+            if msg.get("role") == "assistant" and msg.get("tool_calls"):
+                tool_call_ids = set()
                 for tc in msg["tool_calls"]:
                     if isinstance(tc, dict) and "id" in tc:
-                        clean_tool_calls.append(tc)
-                    elif hasattr(tc, 'to_dict'):
-                        clean_tool_calls.append(tc.to_dict())
-                    elif hasattr(tc, 'id'):
-                        clean_tc = {
-                            'id': tc.id,
-                            'type': getattr(tc, 'type', 'function'),
-                            'function': {
-                                'name': tc.function.name if hasattr(tc, 'function') else '',
-                                'arguments': tc.function.arguments if hasattr(tc, 'function') else '{}'
-                            }
-                        }
-                        clean_tool_calls.append(clean_tc)
+                        tool_call_ids.add(tc["id"])
                 
-                if clean_tool_calls:
+                # Look ahead for tool responses
+                found_responses = set()
+                j = i + 1
+                tool_messages = []
+                
+                while j < len(messages) and messages[j].get("role") == "tool":
+                    tool_msg = messages[j]
+                    tool_call_id = tool_msg.get("tool_call_id")
+                    if tool_call_id in tool_call_ids:
+                        found_responses.add(tool_call_id)
+                        tool_messages.append(tool_msg)
+                    j += 1
+                
+                # Only include if all tool calls have responses
+                if found_responses == tool_call_ids:
+                    validated.append(msg)
+                    validated.extend(tool_messages)
+                else:
+                    logger.warning(f"Removing assistant message with incomplete tool responses")
+                    logger.warning(f"Expected: {tool_call_ids}, Found: {found_responses}")
+                    skip_until_next_user = True
+                
+                # Skip the tool messages we already processed
+                messages = messages[j:]
+                i = -1  # Will be incremented to 0
+                
+            # Handle regular messages
+            elif msg.get("role") in ["system", "user", "assistant"]:
+                validated.append(msg)
+            
+            # Skip orphaned tool messages
+            elif msg.get("role") == "tool":
+                logger.warning(f"Skipping orphaned tool message: {msg.get('tool_call_id', 'unknown')}")
+        
+        return validated
+    
+    def _clean_messages_for_openai(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Clean and validate messages for OpenAI API compatibility"""
+        clean_messages = []
+        
+        for i, msg in enumerate(messages):
+            if isinstance(msg, dict):
+                clean_msg = dict(msg)
+                
+                # Handle tool_calls serialization
+                if 'tool_calls' in clean_msg and clean_msg['tool_calls']:
+                    clean_tool_calls = []
+                    for tc in clean_msg['tool_calls']:
+                        if isinstance(tc, dict):
+                            clean_tool_calls.append(tc)
+                        elif hasattr(tc, 'to_dict'):
+                            clean_tool_calls.append(tc.to_dict())
+                        elif hasattr(tc, 'id'):
+                            clean_tc = {
+                                'id': tc.id,
+                                'type': getattr(tc, 'type', 'function'),
+                                'function': {
+                                    'name': tc.function.name if hasattr(tc, 'function') else '',
+                                    'arguments': tc.function.arguments if hasattr(tc, 'function') else '{}'
+                                }
+                            }
+                            clean_tool_calls.append(clean_tc)
+                        else:
+                            logger.warning(f"Unknown tool call type: {type(tc)}")
+                            clean_tc = {
+                                'id': str(getattr(tc, 'id', f'unknown_{i}')),
+                                'type': 'function',
+                                'function': {
+                                    'name': str(tc),
+                                    'arguments': '{}'
+                                }
+                            }
+                            clean_tool_calls.append(clean_tc)
                     clean_msg['tool_calls'] = clean_tool_calls
-            
-            # Handle tool_call_id for tool messages
-            if role == "tool" and "tool_call_id" in msg:
-                clean_msg["tool_call_id"] = msg["tool_call_id"]
-            
-            clean_messages.append(clean_msg)
+                
+                clean_messages.append(clean_msg)
+            else:
+                clean_messages.append({"role": "assistant", "content": str(msg)})
         
         return clean_messages
     
-    def get_performance_stats(self) -> Dict[str, Any]:
-        """Get performance statistics"""
-        avg_response_time = 0.0
-        if self.local_response_times:
-            avg_response_time = sum(self.local_response_times) / len(self.local_response_times)
+    def _extract_tool_calls_from_text(self, text: str) -> List[MockToolCall]:
+        """Extract tool calls from text response with improved parsing"""
+        if not text or not text.strip():
+            return []
         
-        return {
-            "total_calls": self.call_count,
-            "consecutive_failures": self.consecutive_local_failures,
-            "avg_local_response_time": avg_response_time,
-            "last_provider": self.last_provider,
-            "response_time_samples": len(self.local_response_times)
-        }
+        tool_calls = []
+        seen_calls = set()
+        
+        # Pattern 1: Direct JSON object
+        json_pattern = r'\{"name":\s*"([^"]+)",\s*"arguments":\s*(\{[^}]*\})\}'
+        
+        # Pattern 2: JSON with extra whitespace/formatting
+        json_pattern_loose = r'\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[^}]*\})\s*\}'
+        
+        # Pattern 3: Multiline JSON
+        multiline_pattern = r'\{\s*"name"\s*:\s*"([^"]+)"\s*,\s*"arguments"\s*:\s*(\{[\s\S]*?\})\s*\}'
+        
+        patterns = [json_pattern, json_pattern_loose, multiline_pattern]
+        
+        for pattern in patterns:
+            matches = re.finditer(pattern, text, re.IGNORECASE | re.MULTILINE)
+            
+            for match in matches:
+                try:
+                    name = match.group(1)
+                    args_str = match.group(2)
+                    
+                    # Validate JSON arguments
+                    args_dict = json.loads(args_str)
+                    
+                    # Create a signature for deduplication
+                    call_signature = f"{name}:{json.dumps(args_dict, sort_keys=True)}"
+                    
+                    if call_signature in seen_calls:
+                        logger.debug(f"Skipping duplicate tool call: {call_signature}")
+                        continue
+                    
+                    seen_calls.add(call_signature)
+                    
+                    # Create tool call with unique ID
+                    tool_id = f"call_{len(tool_calls)}_{int(time.time() * 1000) % 10000}"
+                    tool_call = MockToolCall(tool_id, name, args_str)
+                    tool_calls.append(tool_call)
+                    
+                    if len(tool_calls) >= 3:
+                        break
+                    
+                except (json.JSONDecodeError, IndexError):
+                    continue
+        
+        return tool_calls

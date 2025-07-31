@@ -1,6 +1,6 @@
-# voice_assistant/state.py - ENHANCED SYSTEM PROMPT FOR CONSISTENT TOOL CALLING
+# voice_assistant/state.py - ENHANCED WITH DICTATION MODE
 """
-State management for the voice assistant with improved system prompt
+State management for the voice assistant with dictation mode support
 """
 
 import threading
@@ -10,6 +10,8 @@ from enum import Enum
 from typing import Optional, List, Dict, Any
 import subprocess
 import asyncio
+import os
+from pathlib import Path
 
 try:
     import webrtcvad
@@ -22,9 +24,7 @@ from .model_providers.base import TranscriptionProvider, ChatCompletionProvider,
 
 logger = logging.getLogger(__name__)
 
-
-# Replace the SYSTEM_PROMPT in your state.py with this enhanced version
-
+# Enhanced system prompt with dictation mode instructions
 SYSTEM_PROMPT = """You are a helpful voice assistant with access to tools. You MUST use tools for action requests.
 
 === CRITICAL: ALWAYS USE TOOLS FOR ACTIONS ===
@@ -39,6 +39,14 @@ ACTION WORDS THAT REQUIRE TOOLS:
 ✅ "search the web" → MUST use web_search tool
 ✅ "latest news" → MUST use search_news tool
 ✅ "create file" → MUST use create_file tool
+
+=== DICTATION MODE SUPPORT ===
+
+The system supports a special "Dictation Mode" with these behaviors:
+- User can enter dictation mode by saying phrases like "take dictation", "start dictation", "please take dictation"
+- In dictation mode, ALL user speech is captured as text (no tool calls or responses)
+- The ONLY command recognized in dictation mode is "end dictation" or "stop dictation"
+- When dictation ends, the system saves the captured text to a file
 
 === WEBSITE/URL REQUESTS ===
 For ANY website request, you MUST use the open_url tool:
@@ -83,7 +91,6 @@ APPLICATION TOOLS:
 **Applications:** {"name": "launch_app", "arguments": {"app_name": "notepad"}}
 **Websites:** {"name": "open_url", "arguments": {"url": "https://site.com"}}
 **Steam Games:** {"name": "launch_steam_game", "arguments": {"game_name": "game"}}
-
 
 FILE SYSTEM TOOLS:
 - create_file: Create new files
@@ -153,6 +160,7 @@ App Launch → "I've launched [app]"
 
 Remember: Users want to HEAR the results, not just know that tools were executed!"""
 
+
 class AssistantMode(Enum):
     """Assistant operational modes"""
     LISTENING = "listening"          # Actively listening for commands
@@ -161,16 +169,22 @@ class AssistantMode(Enum):
     SPEAKING = "speaking"            # Playing TTS response
     STUCK_CHECK = "stuck_check"      # Listening only for wake phrase
     ERROR = "error"                  # Error state
-    SLEEPING = "sleeping"         # In sleep mode, not listening
+    SLEEPING = "sleeping"            # In sleep mode, not listening
+    DICTATION = "dictation"          # In dictation mode, capturing text
 
 class AssistantState:
-    """Global state management for the assistant"""
+    """Global state management for the assistant with dictation support"""
+    
     def __init__(self, vad_aggressiveness: int = 3):
         self.running = True
         self.mode = AssistantMode.LISTENING
         self.mode_lock = threading.Lock()
         self.processing_start_time: Optional[float] = None
         self.interrupt_flag = threading.Event()
+        
+        # Dictation mode state
+        self.dictation_buffer: List[str] = []
+        self.dictation_start_time: Optional[float] = None
         
         # Model providers - will be injected
         self.transcription_provider: Optional[TranscriptionProvider] = None
@@ -206,7 +220,6 @@ class AssistantState:
         with self.mode_lock:
             old_mode = self.mode
             self.mode = new_mode
-            # Use ASCII-safe arrow for better compatibility
             logger.info(f"Mode transition: {old_mode.value} -> {new_mode.value}")
             
             # Start processing timer
@@ -214,6 +227,13 @@ class AssistantState:
                 self.processing_start_time = time.time()
             elif old_mode == AssistantMode.PROCESSING:
                 self.processing_start_time = None
+                
+            # Handle dictation mode transitions
+            if new_mode == AssistantMode.DICTATION:
+                self.start_dictation()
+            elif old_mode == AssistantMode.DICTATION and new_mode != AssistantMode.DICTATION:
+                # Dictation ended - don't auto-save here, let conversation handler do it
+                pass
     
     def get_mode(self) -> AssistantMode:
         """Thread-safe mode getter"""
@@ -225,6 +245,103 @@ class AssistantState:
         if self.processing_start_time and self.get_mode() == AssistantMode.PROCESSING:
             return (time.time() - self.processing_start_time) > timeout
         return False
+    
+    def is_dictation_mode(self) -> bool:
+        """Check if currently in dictation mode"""
+        return self.get_mode() == AssistantMode.DICTATION
+    
+    def start_dictation(self):
+        """Start dictation mode"""
+        self.dictation_buffer = []
+        self.dictation_start_time = time.time()
+        logger.info("Dictation mode started")
+    
+    def add_dictation_text(self, text: str):
+        """Add text to dictation buffer"""
+        if self.is_dictation_mode():
+            self.dictation_buffer.append(text)
+            logger.info(f"Added to dictation: {text}")
+            # Also print to console for real-time feedback
+            print(f"📝 Dictation: {text}")
+    
+    def get_dictation_content(self) -> str:
+        """Get the complete dictation content"""
+        return "\n".join(self.dictation_buffer)
+    
+    def clear_dictation_buffer(self):
+        """Clear the dictation buffer"""
+        self.dictation_buffer = []
+        self.dictation_start_time = None
+    
+    def get_dictation_stats(self) -> Dict[str, Any]:
+        """Get dictation session statistics"""
+        if not self.dictation_start_time:
+            return {}
+        
+        duration = time.time() - self.dictation_start_time
+        word_count = len(self.get_dictation_content().split()) if self.dictation_buffer else 0
+        
+        return {
+            "duration_seconds": duration,
+            "duration_formatted": f"{int(duration//60)}m {int(duration%60)}s",
+            "word_count": word_count,
+            "line_count": len(self.dictation_buffer),
+            "character_count": len(self.get_dictation_content())
+        }
+    
+    def save_dictation_to_file(self, filename: str, directory: Optional[str] = None) -> str:
+        """Save dictation content to a file"""
+        try:
+            # Determine save directory
+            if directory is None:
+                # Use environment variable or default to Desktop
+                directory = os.getenv("CHATOS_DICTATION_DIR", "~/Desktop")
+            
+            # Expand user path
+            directory = os.path.expanduser(directory)
+            directory_path = Path(directory)
+            
+            # Create directory if it doesn't exist
+            directory_path.mkdir(parents=True, exist_ok=True)
+            
+            # Ensure filename has .txt extension
+            if not filename.lower().endswith('.txt'):
+                filename += '.txt'
+            
+            # Create full file path
+            file_path = directory_path / filename
+            
+            # Get dictation content and stats
+            content = self.get_dictation_content()
+            stats = self.get_dictation_stats()
+            
+            # Create file header with metadata
+            header = f"""Dictation Session - {time.strftime('%Y-%m-%d %H:%M:%S')}
+Duration: {stats.get('duration_formatted', 'Unknown')}
+Words: {stats.get('word_count', 0)}
+Lines: {stats.get('line_count', 0)}
+Characters: {stats.get('character_count', 0)}
+
+--- Begin Dictation ---
+
+"""
+            
+            footer = f"""
+
+--- End Dictation ---
+Saved: {time.strftime('%Y-%m-%d %H:%M:%S')}"""
+            
+            # Write to file
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(header + content + footer)
+            
+            logger.info(f"Dictation saved to: {file_path}")
+            return str(file_path)
+            
+        except Exception as e:
+            error_msg = f"Failed to save dictation: {e}"
+            logger.error(error_msg)
+            raise Exception(error_msg)
         
     def reset_conversation(self):
         """Reset the conversation history"""
@@ -234,7 +351,6 @@ class AssistantState:
     MAX_HISTORY_TOKENS = 4000  # Approximate token limit
 
     def trim_conversation_history(self):
-        logger.info(f"Entering conversation history trim: {len(self.conversation_history)} messages")
         """Trim conversation history to prevent exponential slowdown"""
         original_length = len(self.conversation_history)
         

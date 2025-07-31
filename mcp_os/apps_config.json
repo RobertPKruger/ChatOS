@@ -82,8 +82,11 @@
       "outlook": ["outlook", "email", "mail", "microsoft outlook"],
       "code": ["code", "vscode", "visual studio code", "vs code", "editor"],
       "gcai": [
-        "gcai", "gc ai", "gc_ai", "g c a i", "garratt-callahan ai", "garratt callahan ai", 
+        "gcai", "gee cee ai", "gc ai", "gc_ai", "g c a i", "garratt-callahan ai", "garratt callahan ai",
         "garrattcallahan ai", "garrattcallahan-ai", "garratt-callahan-ai"
+      ],
+      "chatgpt": [
+        "chat gpt", "chat gee pee tee", "chatgpt app", "chatgpt desktop", "chatgpt application"
       ]
     },
     
@@ -293,6 +296,12 @@
     "gcai": {
       "paths": ["C:\\Users\\comma\\Projects\\ChatOS\\mcp_os\\gcai_launcher.cmd"],
       "description": "Garratt-Callahan AI assistant",
+      "category": "productivity",
+      "keywords": ["ai", "assistant", "chat"]
+    },
+    "chatgpt": {
+      "paths": ["C:\\Users\\comma\\Projects\\ChatOS\\mcp_os\\chatgpt_launcher.cmd"],
+      "description": "ChatGPT desktop application",
       "category": "productivity",
       "keywords": ["ai", "assistant", "chat"]
     },
