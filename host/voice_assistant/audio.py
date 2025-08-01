@@ -78,12 +78,113 @@ class ContinuousAudioRecorder:
         """Record audio until silence is detected, optionally checking for stuck phrase"""
         current_mode = state.get_mode()
         
+        # Handle sleeping mode - always listen for wake commands
+        if current_mode == AssistantMode.SLEEPING:
+            logger.info("Listening for wake commands in sleep mode")
+            return await self._record_in_sleep_mode(state, config)
+        
         # Don't record in certain modes unless checking for stuck phrase
         if not check_stuck_phrase and current_mode not in [AssistantMode.LISTENING, AssistantMode.STUCK_CHECK]:
             return None
             
         logger.info(f"Listening for {'stuck phrase' if check_stuck_phrase else 'speech'} in mode: {current_mode.value}")
         
+        return await self._record_normal_mode(state, config, check_stuck_phrase)
+    
+    async def _record_in_sleep_mode(self, state: AssistantState, config) -> Optional[io.BytesIO]:
+        """Record audio specifically for sleep mode - listens for wake commands"""
+        frames = []
+        silence_frames = 0
+        speech_frames = 0
+        speech_started = False
+        
+        # Use shorter timeouts for sleep mode
+        required_silence_frames = int(1.0 * self.sample_rate / (self.sample_rate * 0.03))  # 1 second
+        min_speech_frames = int(0.5 * self.sample_rate / (self.sample_rate * 0.03))  # 0.5 seconds
+        
+        # Lower noise floor for sleep mode to catch wake words better
+        noise_floor = config.silence_threshold * 0.5
+        peak_energy = 0
+        
+        timeout_counter = 0
+        max_timeout = 100  # About 10 seconds of waiting
+        
+        while self.recording and state.get_mode() == AssistantMode.SLEEPING:
+            try:
+                # Get audio chunk with timeout
+                audio_chunk = self.audio_queue.get(timeout=0.1)
+                timeout_counter = 0  # Reset timeout counter on successful audio
+                
+                # Convert to numpy array
+                audio_data = np.frombuffer(audio_chunk, dtype=np.int16)
+                energy = self.get_audio_energy(audio_data)
+                
+                # Update peak energy
+                if energy > peak_energy:
+                    peak_energy = energy
+                
+                # Use VAD if enabled and available
+                if config.enable_vad and state.vad:
+                    # VAD requires specific frame size
+                    frame_duration = 30  # ms
+                    required_samples = int(self.sample_rate * frame_duration / 1000)
+                    
+                    if len(audio_data) == required_samples:
+                        is_speech = state.vad.is_speech(audio_chunk, self.sample_rate)
+                        # Also require energy threshold for VAD
+                        is_speech = is_speech and energy > noise_floor
+                    else:
+                        is_speech = energy > noise_floor
+                else:
+                    is_speech = energy > noise_floor
+                
+                if is_speech:
+                    if not speech_started:
+                        logger.debug(f"Potential wake word detected (energy: {energy:.4f}, threshold: {noise_floor:.4f})")
+                        speech_started = True
+                        frames.append(audio_chunk)
+                        speech_frames += 1
+                    else:
+                        frames.append(audio_chunk)
+                        speech_frames += 1
+                    silence_frames = 0
+                elif speech_started:
+                    frames.append(audio_chunk)
+                    silence_frames += 1
+                    
+                    if silence_frames >= required_silence_frames:
+                        # Check if we have enough speech frames
+                        if speech_frames >= min_speech_frames:
+                            logger.debug(f"Wake command captured: {speech_frames} speech frames")
+                            break
+                        else:
+                            # Reset for next potential wake word
+                            frames = []
+                            speech_frames = 0
+                            speech_started = False
+                            silence_frames = 0
+                            peak_energy = 0
+                        
+            except queue.Empty:
+                timeout_counter += 1
+                if timeout_counter > max_timeout:
+                    # Return None after timeout to prevent hanging
+                    return None
+                await asyncio.sleep(0.01)
+                continue
+            except Exception as e:
+                logger.error(f"Error in sleep mode audio recording: {e}")
+                break
+        
+        # Check if we captured something useful
+        if not frames or speech_frames < min_speech_frames:
+            return None
+        
+        # Convert frames to WAV
+        return self._frames_to_wav(frames)
+    
+    async def _record_normal_mode(self, state: AssistantState, config, check_stuck_phrase: bool) -> Optional[io.BytesIO]:
+        """Record audio in normal listening mode"""
         frames = []
         silence_frames = 0
         speech_frames = 0
@@ -200,7 +301,10 @@ class ContinuousAudioRecorder:
             logger.debug(f"Rejecting low-energy audio (peak: {peak_energy:.4f})")
             return None
         
-        # Convert frames to WAV
+        return self._frames_to_wav(frames)
+    
+    def _frames_to_wav(self, frames) -> Optional[io.BytesIO]:
+        """Convert audio frames to WAV format"""
         wav_buffer = io.BytesIO()
         try:
             with sf.SoundFile(
