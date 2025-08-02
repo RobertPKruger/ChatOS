@@ -1,6 +1,6 @@
-# voice_assistant/model_providers/failover_chat.py - Enhanced with Ollama retries
+# voice_assistant/model_providers/failover_chat.py - FIXED VERSION
 """
-Enhanced failover chat provider with configurable Ollama retry logic
+Fixed failover chat provider that forces OpenAI for all action requests
 """
 
 import json
@@ -56,27 +56,17 @@ class MockCompletion:
         self.choices = choices
 
 class FailoverChatProvider:
-    """Enhanced chat provider with configurable Ollama retry logic"""
+    """Fixed chat provider that forces OpenAI for action requests"""
     
-    def __init__(self, primary: ChatCompletionProvider, backup: ChatCompletionProvider, 
-                 timeout: float = 15, max_retries: int = 3, retry_delay: float = 1.0):
+    def __init__(self, primary: ChatCompletionProvider, backup: ChatCompletionProvider, timeout: float = 15):
         self.primary = primary
         self.backup = backup
         self.timeout = max(timeout, 10)
-        self.max_retries = max_retries  # NEW: Maximum number of retries for Ollama
-        self.retry_delay = retry_delay  # NEW: Delay between retries (seconds)
         self.last_provider = "unknown"
         self.call_count = 0
         self.consecutive_local_failures = 0
         self.max_consecutive_failures = 2
         self.force_backup_next = False
-        
-        # Track retry statistics
-        self.retry_stats = {
-            "total_retries": 0,
-            "successful_retries": 0,
-            "failed_after_retries": 0
-        }
         
         # Keywords that indicate need for web search or real-time data
         self.web_keywords = [
@@ -85,6 +75,19 @@ class FailoverChatProvider:
             'reach out to the web', 'look up', 'find out', 'check online',
             'go to the web', 'search the web', '.com', '.org', '.net', '.gov', '.edu',
             'website', 'site', 'page', 'url'
+        ]
+        
+        # Action keywords that require tools - FORCE OPENAI FOR THESE
+        self.action_keywords = [
+            'open', 'launch', 'start', 'run', 'execute', 'create', 'make', 'delete', 
+            'remove', 'save', 'close', 'quit', 'exit', 'go to', 'navigate to',
+            'find', 'search for', 'get', 'fetch', 'download', 'upload', 'send',
+            'play', 'pause', 'stop', 'record', 'capture', 'install', 'uninstall',
+            'update', 'upgrade', 'configure', 'setup', 'enable', 'disable',
+            'turn on', 'turn off', 'switch', 'toggle', 'set', 'change', 'modify',
+            'edit', 'copy', 'move', 'rename', 'list', 'show', 'display',
+            'please open', 'please launch', 'please create', 'please go to',
+            'can you open', 'can you launch', 'can you create'
         ]
         
     def _should_force_backup(self, messages: List[Dict[str, Any]]) -> bool:
@@ -108,57 +111,16 @@ class FailoverChatProvider:
                 logger.info(f"Forcing backup due to web keyword: '{keyword}'")
                 return True
         
+        # FORCE BACKUP FOR ALL ACTION REQUESTS
+        for keyword in self.action_keywords:
+            if keyword in last_user_msg:
+                logger.info(f"🎯 Forcing backup for action keyword: '{keyword}'")
+                return True
+        
         return False
-    
-    def _retry_ollama_with_backoff(self, messages: List[Dict[str, Any]], 
-                                   tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
-        """Retry Ollama with exponential backoff"""
-        last_exception = None
-        
-        for attempt in range(self.max_retries + 1):  # +1 for initial attempt
-            try:
-                if attempt > 0:
-                    # Calculate delay with exponential backoff
-                    delay = self.retry_delay * (2 ** (attempt - 1))
-                    logger.info(f"🔄 Ollama retry attempt {attempt}/{self.max_retries} after {delay:.1f}s delay")
-                    time.sleep(delay)
-                    self.retry_stats["total_retries"] += 1
-                
-                # Try primary provider
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(self._try_primary_with_tools, messages, tools, **kwargs)
-                    result = future.result(timeout=self.timeout)
-                    
-                    if attempt > 0:
-                        self.retry_stats["successful_retries"] += 1
-                        logger.info(f"✅ Ollama succeeded on retry attempt {attempt}/{self.max_retries}")
-                    
-                    return result
-                    
-            except concurrent.futures.TimeoutError as e:
-                last_exception = f"Timeout after {self.timeout}s"
-                logger.warning(f"🕒 Ollama attempt {attempt + 1} timed out")
-                
-            except Exception as e:
-                last_exception = str(e)
-                logger.warning(f"💥 Ollama attempt {attempt + 1} failed: {str(e)[:100]}")
-                
-                # Check if this is a connection error that might benefit from retry
-                error_str = str(e).lower()
-                if not any(recoverable in error_str for recoverable in [
-                    'connection', 'timeout', 'network', 'unavailable', 'refused'
-                ]):
-                    # Non-recoverable error, don't retry
-                    logger.info(f"🚫 Non-recoverable error, skipping remaining retries: {e}")
-                    break
-        
-        # All retries exhausted
-        self.retry_stats["failed_after_retries"] += 1
-        logger.warning(f"❌ Ollama failed after {self.max_retries} retries. Last error: {last_exception}")
-        raise Exception(f"Ollama failed after {self.max_retries} retries: {last_exception}")
         
     def complete(self, messages: List[Dict[str, Any]], tools: Optional[List[Dict[str, Any]]] = None, **kwargs) -> Any:
-        """Completion with enhanced Ollama retry logic"""
+        """Completion with improved failover logic"""
         self.call_count += 1
         logger.info(f"=== Failover complete() call #{self.call_count} ===")
         
@@ -168,11 +130,14 @@ class FailoverChatProvider:
             self.force_backup_next = False
             return self._try_backup(messages, tools, **kwargs)
         
-        # Check if we should force backup for web queries
+        # Check if we should force backup for web queries OR action requests
         if self._should_force_backup(messages):
-            logger.info("🌐 Web-related query detected - using backup provider")
+            logger.info("🚀 Action/web query detected - using OpenAI for reliable tool calling")
             logger.info(f"🔧 Passing {len(tools) if tools else 0} tools to backup provider")
             return self._try_backup(messages, tools, **kwargs)
+        
+        # For non-action requests, allow local model
+        logger.info("💬 Conversational query - allowing local model")
         
         # Quick heuristic for tool follow-ups
         has_tool_results = any(msg.get("role") == "tool" for msg in messages[-3:])
@@ -180,27 +145,42 @@ class FailoverChatProvider:
             logger.info("Multiple recent failures + tool results - using backup immediately")
             return self._try_backup(messages, tools, **kwargs)
         
-        # Try primary with retries
+        # Try primary with reduced timeout for tool follow-ups
+        if has_tool_results:
+            logger.info("Detected tool response scenario - using reduced timeout")
+            timeout = min(self.timeout, 8)
+        else:
+            timeout = self.timeout
+            
         try:
             start_time = time.time()
-            result = self._retry_ollama_with_backoff(messages, tools, **kwargs)
             
-            elapsed = time.time() - start_time
-            
-            # Check if local model provided a useful response
-            if self._is_poor_local_response(result, messages):
-                logger.warning("🔄 Local model gave poor response for this query - trying backup")
-                self.consecutive_local_failures += 1
-                return self._try_backup(messages, tools, **kwargs)
-            
-            logger.info(f"✅ Primary model succeeded in {elapsed:.1f}s")
-            self.last_provider = "local"
-            self.consecutive_local_failures = 0
-            return result
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(self._try_primary_with_tools, messages, tools, **kwargs)
+                try:
+                    result = future.result(timeout=timeout)
+                    elapsed = time.time() - start_time
+                    
+                    # Check if local model provided a useful response
+                    if self._is_poor_local_response(result, messages):
+                        logger.warning("🔄 Local model gave poor response for this query - trying backup")
+                        self.consecutive_local_failures += 1
+                        return self._try_backup(messages, tools, **kwargs)
+                    
+                    logger.info(f"✅ Primary model succeeded in {elapsed:.1f}s")
+                    self.last_provider = "local"
+                    self.consecutive_local_failures = 0
+                    return result
+                    
+                except concurrent.futures.TimeoutError:
+                    elapsed = time.time() - start_time
+                    logger.warning(f"🕒 Primary model timed out after {elapsed:.1f}s → fallback")
+                    self.consecutive_local_failures += 1
+                    future.cancel()
             
         except Exception as e:
-            elapsed = time.time() - start_time if 'start_time' in locals() else 0
-            logger.warning(f"💥 All Ollama retries exhausted → fallback. Total time: {elapsed:.1f}s")
+            elapsed = time.time() - start_time
+            logger.warning(f"💥 Local LLM failed → fallback. Reason: {str(e)[:100]} (after {elapsed:.1f}s)")
             self.consecutive_local_failures += 1
         
         # Fallback to backup
@@ -234,6 +214,15 @@ class FailoverChatProvider:
                 ]):
                     # Local model claiming to have current data - this is wrong
                     logger.warning("Local model claiming to have current data it doesn't have")
+                    return True
+        
+        # CRITICAL: Check if user asked for action but got generic response
+        for keyword in self.action_keywords:
+            if keyword in last_user_msg:
+                if any(phrase in content.lower() for phrase in [
+                    "i've completed that task", "task completed", "done", "i've done that"
+                ]):
+                    logger.warning(f"🚫 Local model gave fake completion for action: '{keyword}'")
                     return True
         
         return False
@@ -288,20 +277,6 @@ class FailoverChatProvider:
             mock_message = MockMessage("I'm having trouble processing your request right now. Please try again.")
             mock_choice = MockChoice(mock_message)
             return MockCompletion([mock_choice])
-    
-    def get_retry_stats(self) -> Dict[str, Any]:
-        """Get retry statistics for monitoring"""
-        return {
-            **self.retry_stats,
-            "retry_success_rate": (
-                self.retry_stats["successful_retries"] / max(self.retry_stats["total_retries"], 1) * 100
-            ),
-            "config": {
-                "max_retries": self.max_retries,
-                "retry_delay": self.retry_delay,
-                "timeout": self.timeout
-            }
-        }
     
     def _validate_tool_message_pairs(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Ensure all tool_calls have corresponding tool responses and vice versa"""
