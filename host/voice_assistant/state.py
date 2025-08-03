@@ -367,38 +367,157 @@ Saved: {time.strftime('%Y-%m-%d %H:%M:%S')}"""
         self.trim_conversation_history()
 
     def add_assistant_message(self, content: str, tool_calls=None):
-        """Add assistant message and auto-trim if needed"""
+        """Add assistant message and auto-trim if needed - FIXED VERSION"""
         msg = {"role": "assistant", "content": content}
+        
         if tool_calls:
-            # Ensure tool_calls are JSON-serializable
-            if isinstance(tool_calls, list) and len(tool_calls) > 0:
-                if hasattr(tool_calls[0], '__dict__'):  # It's an object, not a dict
-                    # Convert to dict format
-                    serialized_tool_calls = []
-                    for tc in tool_calls:
-                        if isinstance(tc, dict):
+            # FIXED: Ensure tool_calls are properly serialized with unique IDs
+            serialized_tool_calls = []
+            
+            for i, tc in enumerate(tool_calls):
+                try:
+                    if isinstance(tc, dict):
+                        # Already a dict - validate it has required fields
+                        if "id" in tc and "function" in tc:
                             serialized_tool_calls.append(tc)
                         else:
-                            serialized_tc = {
-                                'id': getattr(tc, 'id', ''),
-                                'type': getattr(tc, 'type', 'function'),
-                                'function': {
-                                    'name': tc.function.name if hasattr(tc, 'function') else '',
-                                    'arguments': tc.function.arguments if hasattr(tc, 'function') else '{}'
-                                }
+                            logger.warning(f"Invalid tool call dict missing id/function: {tc}")
+                            
+                    elif hasattr(tc, '__dict__'):  # It's an object
+                        # Generate a proper unique ID
+                        unique_id = f"call_{int(time.time() * 1000)}_{i}"
+                        
+                        serialized_tc = {
+                            'id': getattr(tc, 'id', unique_id),
+                            'type': getattr(tc, 'type', 'function'),
+                            'function': {
+                                'name': getattr(tc.function, 'name', '') if hasattr(tc, 'function') else '',
+                                'arguments': getattr(tc.function, 'arguments', '{}') if hasattr(tc, 'function') else '{}'
                             }
-                            serialized_tool_calls.append(serialized_tc)
-                    msg["tool_calls"] = serialized_tool_calls
-                else:
-                    msg["tool_calls"] = tool_calls
+                        }
+                        serialized_tool_calls.append(serialized_tc)
+                        
+                    else:
+                        logger.warning(f"Unknown tool call type: {type(tc)}")
+                        
+                except Exception as e:
+                    logger.error(f"Error serializing tool call {i}: {e}")
+                    continue
+            
+            if serialized_tool_calls:
+                msg["tool_calls"] = serialized_tool_calls
+                logger.debug(f"Added assistant message with {len(serialized_tool_calls)} tool calls")
+            else:
+                logger.warning("No valid tool calls found, adding as text-only message")
+        
         self.conversation_history.append(msg)
         self.trim_conversation_history()
 
     def add_tool_message(self, tool_call_id: str, content: str):
-        """Add tool result message and auto-trim if needed"""
-        self.conversation_history.append({
+        """Add tool result message with validation - FIXED VERSION"""
+        
+        # CRITICAL FIX: Validate that the tool_call_id exists in recent assistant messages
+        tool_call_exists = False
+        
+        # Look for the tool call ID in recent assistant messages (last 5 messages)
+        for msg in reversed(self.conversation_history[-5:]):
+            if (msg.get("role") == "assistant" and 
+                msg.get("tool_calls")):
+                
+                for tc in msg["tool_calls"]:
+                    if tc.get("id") == tool_call_id:
+                        tool_call_exists = True
+                        break
+                
+                if tool_call_exists:
+                    break
+        
+        if not tool_call_exists:
+            logger.warning(f"🚨 ORPHANED TOOL MESSAGE DETECTED: {tool_call_id}")
+            logger.warning(f"Tool result: {content[:100]}...")
+            
+            # Don't add orphaned tool messages - they corrupt conversation history
+            return
+        
+        # Safe to add the tool message
+        tool_msg = {
             "role": "tool",
             "tool_call_id": tool_call_id,
             "content": content
-        })
+        }
+        
+        self.conversation_history.append(tool_msg)
+        logger.debug(f"Added tool message for call_id: {tool_call_id}")
         self.trim_conversation_history()
+
+    def validate_conversation_history(self):
+        """Validate and clean conversation history - NEW METHOD"""
+        """Remove orphaned tool messages and validate tool call pairs"""
+        
+        cleaned_history = []
+        i = 0
+        
+        while i < len(self.conversation_history):
+            msg = self.conversation_history[i]
+            role = msg.get("role")
+            
+            if role in ["system", "user"]:
+                # System and user messages are always valid
+                cleaned_history.append(msg)
+                i += 1
+                
+            elif role == "assistant":
+                if msg.get("tool_calls"):
+                    # Assistant message with tool calls - validate tool responses
+                    tool_call_ids = {tc.get("id") for tc in msg["tool_calls"] if tc.get("id")}
+                    
+                    # Look ahead for corresponding tool messages
+                    j = i + 1
+                    found_tool_responses = []
+                    
+                    while j < len(self.conversation_history):
+                        next_msg = self.conversation_history[j]
+                        if next_msg.get("role") == "tool":
+                            tool_call_id = next_msg.get("tool_call_id")
+                            if tool_call_id in tool_call_ids:
+                                found_tool_responses.append(next_msg)
+                            j += 1
+                        else:
+                            break
+                    
+                    # Only include if we have matching tool responses
+                    found_ids = {msg.get("tool_call_id") for msg in found_tool_responses}
+                    
+                    if found_ids == tool_call_ids:
+                        # All tool calls have responses
+                        cleaned_history.append(msg)
+                        cleaned_history.extend(found_tool_responses)
+                        logger.debug(f"Validated assistant message with {len(tool_call_ids)} tool calls")
+                    else:
+                        # Some tool calls are orphaned
+                        missing_ids = tool_call_ids - found_ids
+                        logger.warning(f"Removing assistant message with orphaned tool calls: {missing_ids}")
+                    
+                    i = j
+                else:
+                    # Regular assistant message without tool calls
+                    cleaned_history.append(msg)
+                    i += 1
+                    
+            elif role == "tool":
+                # Orphaned tool message (should have been handled above)
+                logger.warning(f"Removing orphaned tool message: {msg.get('tool_call_id')}")
+                i += 1
+                
+            else:
+                # Unknown role
+                logger.warning(f"Unknown message role: {role}")
+                i += 1
+        
+        # Update conversation history if changes were made
+        if len(cleaned_history) != len(self.conversation_history):
+            original_length = len(self.conversation_history)
+            self.conversation_history = cleaned_history
+            logger.info(f"🧹 Cleaned conversation history: {original_length} → {len(cleaned_history)} messages")
+        
+        return len(cleaned_history)

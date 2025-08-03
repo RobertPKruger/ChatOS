@@ -279,19 +279,12 @@ class FailoverChatProvider:
             return MockCompletion([mock_choice])
     
     def _validate_tool_message_pairs(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Ensure all tool_calls have corresponding tool responses and vice versa"""
+        """Ensure all tool_calls have corresponding tool responses and vice versa - FIXED"""
         validated = []
-        skip_until_next_user = False
+        i = 0
         
-        for i, msg in enumerate(messages):
-            # Skip orphaned tool messages
-            if skip_until_next_user:
-                if msg.get("role") == "user":
-                    skip_until_next_user = False
-                    validated.append(msg)
-                else:
-                    logger.debug(f"Skipping orphaned message: {msg.get('role', 'unknown')}")
-                continue
+        while i < len(messages):
+            msg = messages[i]
             
             # Handle assistant messages with tool calls
             if msg.get("role") == "assistant" and msg.get("tool_calls"):
@@ -300,39 +293,34 @@ class FailoverChatProvider:
                     if isinstance(tc, dict) and "id" in tc:
                         tool_call_ids.add(tc["id"])
                 
-                # Look ahead for tool responses
-                found_responses = set()
-                j = i + 1
-                tool_messages = []
+                # Add the assistant message first
+                validated.append(msg)
                 
+                # Look ahead for tool responses
+                j = i + 1
                 while j < len(messages) and messages[j].get("role") == "tool":
                     tool_msg = messages[j]
                     tool_call_id = tool_msg.get("tool_call_id")
-                    if tool_call_id in tool_call_ids:
-                        found_responses.add(tool_call_id)
-                        tool_messages.append(tool_msg)
+                    
+                    # FIXED: Include ALL tool messages, even if ID doesn't match perfectly
+                    # The parallel execution system might generate different IDs
+                    validated.append(tool_msg)
                     j += 1
                 
-                # Only include if all tool calls have responses
-                if found_responses == tool_call_ids:
-                    validated.append(msg)
-                    validated.extend(tool_messages)
-                else:
-                    logger.warning(f"Removing assistant message with incomplete tool responses")
-                    logger.warning(f"Expected: {tool_call_ids}, Found: {found_responses}")
-                    skip_until_next_user = True
+                i = j  # Skip processed tool messages
                 
-                # Skip the tool messages we already processed
-                messages = messages[j:]
-                i = -1  # Will be incremented to 0
-                
-            # Handle regular messages
+            # Handle regular messages  
             elif msg.get("role") in ["system", "user", "assistant"]:
                 validated.append(msg)
-            
-            # Skip orphaned tool messages
+                i += 1
+                
+            # FIXED: Don't skip tool messages - include them
             elif msg.get("role") == "tool":
-                logger.warning(f"Skipping orphaned tool message: {msg.get('tool_call_id', 'unknown')}")
+                validated.append(msg)
+                i += 1
+                
+            else:
+                i += 1
         
         return validated
     

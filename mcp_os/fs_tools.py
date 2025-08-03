@@ -21,9 +21,21 @@ documents_path = BASE_DIR / "Documents"
 
 
 def safe_path(raw: str) -> pathlib.Path:
-    """Fixed path resolution that handles both Windows and Unix paths"""
+    """Fixed path resolution that handles OneDrive desktop consistently"""
     # Strip whitespace / quotes
     raw = raw.strip().strip('"').strip("'")
+    
+    # Check if OneDrive desktop exists and use it as primary
+    onedrive_desktop = pathlib.Path.home() / "OneDrive" / "Desktop"
+    regular_desktop = pathlib.Path.home() / "Desktop"
+    
+    # Determine which desktop to use
+    if onedrive_desktop.exists():
+        desktop_path = onedrive_desktop
+        documents_path = pathlib.Path.home() / "OneDrive" / "Documents"
+    else:
+        desktop_path = regular_desktop
+        documents_path = pathlib.Path.home() / "Documents"
     
     # WINDOWS FIX: Handle Unix-style paths from Ollama/local models
     if platform.system() == "Windows" and raw.startswith("/"):
@@ -41,14 +53,14 @@ def safe_path(raw: str) -> pathlib.Path:
                     return documents_path / remaining_path[10:]  # Remove "Documents/"
                 else:
                     # Default to home directory
-                    return BASE_DIR / remaining_path
+                    return pathlib.Path.home() / remaining_path
             else:
                 # Just /Users/ or /home/ - default to home
-                return BASE_DIR
+                return pathlib.Path.home()
         else:
             # Other Unix absolute paths - try to map to Windows
-            # Remove leading slash and treat as relative to BASE_DIR
-            return BASE_DIR / raw[1:]
+            # Remove leading slash and treat as relative to home
+            return pathlib.Path.home() / raw[1:]
 
     # ── Handle desktop alias ───────────────────────────
     if raw.lower() in {"desktop", "~/desktop", "%desktop%"}:
@@ -79,8 +91,11 @@ def safe_path(raw: str) -> pathlib.Path:
         pass  # Allow most Windows paths under user directories
     else:
         # Unix sandbox logic
+        BASE_DIR = pathlib.Path.home()
         if BASE_DIR not in p.parents and p != BASE_DIR:
             raise ValueError(f"Path '{raw}' is outside the allowed area.")
+    
+    return p
 
 def result(msg: str) -> str | TextContent:
     """Wrap once so you can switch to TextContent later if desired."""
