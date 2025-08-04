@@ -79,6 +79,9 @@
       "lucius-shepard.com": [
         "lucius shepard", "lucius-shepard", "go to lucius shepard", "open lucius shepard", "www.lucius-shepard.com"
       ],
+      "snipping_tool": [
+        "snipping tool", "snip", "screen snip", "screenshot", "take a screenshot"
+      ],
       "github.com": ["github", "go to github", "open github", "www.github.com"],
       "weather.com": ["weather", "go to weather", "open weather", "check weather", "weather.com"],
       "reddit.com": ["reddit", "go to reddit", "open reddit", "www.reddit.com"],
@@ -322,6 +325,12 @@
       "description": "ChatGPT desktop application",
       "category": "productivity",
       "keywords": ["ai", "assistant", "chat"]
+    },
+    "snipping_tool": {
+      "paths": ["C:\\Users\\comma\\Projects\\ChatOS\\mcp_os\\snip_launcher.cmd"],
+      "description": "Snipping tool application",
+      "category": "productivity",
+      "keywords": ["snipping", "tool", "screenshot"]
     },
     "garratt-callahan ai": {
       "paths": ["C:\\Users\\comma\\Projects\\ChatOS\\mcp_os\\gcai_launcher.cmd"],
