@@ -52,11 +52,23 @@
         "acrobat", "adobe acrobat", "acrobat reader", "adobe reader", "pdf reader",
         "reader", "pdf", "open pdf", "view pdf", "adobe", "acrobat dc", "acrobat pro"
       ],
+      "google_search": ["google", "search", "search google", "google search", "lookup", "look up", "find"],
+      "search_youtube": ["youtube", "youtube search", "search youtube", "find videos"],
+      "search_amazon": ["amazon search", "search amazon", "shop", "buy"],
+      "search_google_images": ["image search", "search images", "find images", "google images"],
+      "search_google_news": ["news search", "search news", "google news", "find news"],
       "amazon.com": [
         "amazon", "go to amazon", "open amazon", "shop amazon", "shop on amazon","www.amazon.com"
       ],
       "duolingo.com": [
         "doo oh lingo", "duolingo", "go to duolingo", "open duolingo", "learn languages", "www.duolingo.com"
+      ],
+      "life-is-a-game-column": [
+        "take me to the life is a game column", "life is a game", "life is a game column", 
+        "go to life is a game column", "open life is a game column", 
+        "take me to robert kruger's life is a game column",
+        "robert kruger life is a game column", "robert kruger nugget news",
+        "robert kruger column on nugget news", "https://www.nuggetnews.com/author/robert_kruger"
       ],
       "robertpkruger.com": [
         "robert p kruger", "robert p krueger", "robert k kruger", "robertpk", "robertpkruger", "go to robert p kruger", "open robert p kruger", "www.robertpkruger.com"
@@ -180,6 +192,12 @@
       "description": "Nugget News website",
       "category": "websites", 
       "keywords": ["news", "information"]
+    },
+    "life-is-a-game-column": {
+      "paths": ["url:https://www.nuggetnews.com/author/robert_kruger"],
+      "description": "Nugget News website - Life is a Game column",
+      "category": "websites", 
+      "keywords": ["games", "information", "essay"]
     },
     "lucius-shepard.com": {
       "paths": ["url:http://www.lucius-shepard.com/"],

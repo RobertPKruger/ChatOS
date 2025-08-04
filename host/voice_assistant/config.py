@@ -73,6 +73,8 @@ class Config:
     english_confidence_threshold: float
 
     acknowledge_launches: bool = True  # Voice acknowledgment for app launches
+
+    use_openai_for_urls: bool = True  # Add this field
     
     @classmethod
     def from_env(cls) -> "Config":
@@ -136,6 +138,8 @@ class Config:
             # === VALIDATION CONFIGURATION ===
             min_confidence_length=int(os.getenv("MIN_CONFIDENCE_LENGTH", "3")),
             english_confidence_threshold=float(os.getenv("ENGLISH_CONFIDENCE_THRESHOLD", "0.7")),
+
+            use_openai_for_urls=os.getenv("USE_OPENAI_FOR_URLS", "true").lower() == "true"
         )
 
 def setup_logging(config: Config):
